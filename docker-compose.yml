@@ -1,0 +1,47 @@
+services:
+  web:
+    build: .
+    environment:
+      SNA_TOKEN_SECRET: ${SNA_TOKEN_SECRET:-development-change-this-secret}
+    ports: ["8080:8080"]
+    volumes: [pilot_data:/data]
+    read_only: true
+    tmpfs: ["/tmp"]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    depends_on:
+      postgis: {condition: service_healthy}
+  postgis:
+    image: postgis/postgis:16-3.4
+    environment:
+      POSTGRES_DB: sna
+      POSTGRES_USER: sna_admin
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pilot-change-me}
+    volumes:
+      - postgis_data:/var/lib/postgresql/data
+      - ./db/migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL","pg_isready -U sna_admin -d sna"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [backend]
+    ports: ["127.0.0.1:5432:5432"]
+  backup:
+    image: postgis/postgis:16-3.4
+    profiles: ["operations"]
+    environment:
+      PGHOST: postgis
+      PGDATABASE: sna
+      PGUSER: sna_admin
+      PGPASSWORD: ${POSTGRES_PASSWORD:-pilot-change-me}
+    volumes:
+      - ./scripts:/scripts:ro
+      - ./backups:/backups
+    entrypoint: ["/bin/sh","/scripts/backup.sh"]
+    networks: [backend]
+networks:
+  backend: {internal: true}
+volumes:
+  pilot_data:
+  postgis_data:

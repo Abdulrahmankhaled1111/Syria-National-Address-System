@@ -1,0 +1,50 @@
+services:
+  web:
+    build: .
+    restart: unless-stopped
+    environment:
+      SNA_ENV: production
+      SNA_TOKEN_SECRET: ${SNA_TOKEN_SECRET:?required}
+      SNA_TOKEN_TTL_SECONDS: ${SNA_TOKEN_TTL_SECONDS:-3600}
+      SNA_ALLOWED_HOSTS: ${SNA_ALLOWED_HOSTS:?required},127.0.0.1,localhost,web
+      SNA_DB_PATH: /data/registry.db
+      SNA_BOOTSTRAP_ADMIN_USERNAME: ${SNA_BOOTSTRAP_ADMIN_USERNAME:-state-admin}
+      SNA_BOOTSTRAP_ADMIN_PASSWORD: ${SNA_BOOTSTRAP_ADMIN_PASSWORD:?required}
+    volumes:
+      - registry_data:/data
+    read_only: true
+    tmpfs: ["/tmp"]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    networks: [edge]
+    healthcheck:
+      test: ["CMD","python","-c","import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/ready')"]
+      interval: 20s
+      timeout: 3s
+      retries: 5
+
+  gateway:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    depends_on:
+      web: {condition: service_healthy}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./deploy/tls:/etc/nginx/tls:ro
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx
+      - /var/run
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    cap_add: ["NET_BIND_SERVICE"]
+    networks: [edge]
+
+networks:
+  edge:
+
+volumes:
+  registry_data:

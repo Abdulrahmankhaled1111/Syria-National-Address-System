@@ -1,0 +1,13 @@
+.env
+pilot.db
+*.pid
+backups/
+data/backups/
+output/
+tmp/
+__pycache__/
+*.pyc
+data/national/*.osm.pbf
+data/national/*.sqlite
+tools/python/
+app/vendor/
