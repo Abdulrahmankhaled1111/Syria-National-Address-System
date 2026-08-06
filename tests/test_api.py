@@ -216,12 +216,16 @@ class ApiTest(unittest.TestCase):
         self.assertTrue(all("owner" not in f["properties"] for f in export["features"]))
     def test_national_catalog_statistics_and_place_search(self):
         status,stats=call("/api/v1/national/statistics")
-        self.assertEqual(status,200)
-        self.assertGreater(int(stats["roads"]),300000)
-        self.assertGreater(int(stats["buildings"]),1000000)
-        status,result=call("/api/v1/catalog/search?q=%D8%AF%D9%85%D8%B4%D9%82")
-        self.assertEqual(status,200)
-        self.assertTrue(any(x["object_type"]=="PLACE" for x in result["items"]))
+        if (ROOT/"data/national/syria_catalog.sqlite").exists():
+            self.assertEqual(status,200)
+            self.assertGreater(int(stats["roads"]),300000)
+            self.assertGreater(int(stats["buildings"]),1000000)
+            status,result=call("/api/v1/catalog/search?q=%D8%AF%D9%85%D8%B4%D9%82")
+            self.assertEqual(status,200)
+            self.assertTrue(any(x["object_type"]=="PLACE" for x in result["items"]))
+        else:
+            self.assertEqual(status,503)
+            self.assertEqual(stats["status"],"not_imported")
     def test_house_number_assignment_becomes_searchable_after_approval(self):
         status,buildings=call("/api/v1/map/zabadani/buildings")
         self.assertEqual(status,200);self.assertEqual(len(buildings["features"]),2350)
