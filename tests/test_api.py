@@ -209,6 +209,8 @@ class ApiTest(unittest.TestCase):
         street=next(item for item in streets if item["official_code"]=="SY-RD-ZAB-STR-000001")
         self.assertEqual(street["road_class"],"PRIMARY")
         self.assertEqual(street["former_names"],["الطريق القديم"])
+        scoped=call("/api/v1/streets",token=editor)[1]
+        self.assertTrue(scoped);self.assertTrue(all(item["admin_unit_id"]=="au-zab" for item in scoped))
     def test_municipality_can_capture_parcel_as_reviewable_draft(self):
         editor=self.login("zabadani.editor","Zabadani123!")
         body={"section_number":"2","parcel_number":"44","quality_level":"D","geometry":{"type":"Polygon",
