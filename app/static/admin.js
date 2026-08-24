@@ -168,7 +168,7 @@ function prepareFieldMap(){
     governorates=data;
     const national=data.length>1?`<option value="ALL">${lang==="ar"?"سوريا كاملة – ١٤ محافظة":lang==="de"?"Ganz Syrien – 14 Gouvernements":"All Syria – 14 governorates"}</option>`:"";
     $("#governorate-scope").innerHTML=national+data.map(item=>`<option value="${esc(item.id)}">${esc(item.official_code)} · ${esc(lang==="ar"?item.name_ar:item.name_en)}</option>`).join("");
-    if(data.length>1){const start=data.find(item=>item.id==="au-di")||data[0];$("#governorate-scope").value=start.id;activeAdminUnitId=start.id}else if(data[0]){$("#governorate-scope").value=data[0].id;activeAdminUnitId=data[0].id}
+    if(data.length>1){const saved=localStorage.getItem("sna_active_admin_unit"),start=data.find(item=>item.id===saved)||data.find(item=>item.id==="au-di")||data[0];$("#governorate-scope").value=start.id;activeAdminUnitId=start.id}else if(data[0]){$("#governorate-scope").value=data[0].id;activeAdminUnitId=data[0].id}
     setTimeout(()=>$("#governorate-show").click(),0);
   });
   fetch("/api/v1/map/syria/governorates").then(response=>response.json()).then(data=>{
@@ -181,6 +181,7 @@ function prepareFieldMap(){
   $("#governorate-scope").onchange=()=>$("#governorate-show").click();
   $("#governorate-show").onclick=async()=>{
     const selected=$("#governorate-scope").value;
+    if(selected)localStorage.setItem("sna_active_admin_unit",selected);
     if(selected==="ALL"){
       activeAdminUnitId="ALL";
       selectedGovernorateBoundary=null;fieldMap.setMaxBounds(null);syncFieldBoundarySources();renderFieldNationalOverlay();
@@ -216,7 +217,9 @@ function prepareFieldMap(){
     if($("#parcel-district-label"))$("#parcel-district-label").value=`${item.official_code} · ${lang==="ar"?item.name_ar:item.name_en}`;
     if($("#cad-print-title"))$("#cad-print-title").value=lang==="de"?`Liegenschaftskarte ${item.name_en}`:`Cadastral map ${item.name_en}`;
     if(item.id==="au-di"){$("#house-postal").value="010001";$("#house-locality").value="010001 Damascus"}
-    await loadBuildings();await loadSections();focusSelectedSection();
+    // Keep the camera on the selected administrative area. Loading a building
+    // or the first cadastral section must never send the user back to the pilot.
+    await loadBuildings();await loadSections();
   };
   $("#workflow-new-section").insertAdjacentHTML("afterend",`<div class="workflow-inline-actions"><button id="workflow-edit-section" class="ghost" type="button">${lang==="de"?"Bearbeiten":"Edit"}</button><button id="workflow-delete-section" class="ghost danger" type="button">${lang==="de"?"Löschen":"Delete"}</button></div>`);
   $("#workflow-capture-parcel").insertAdjacentHTML("afterend",`<div class="workflow-inline-actions"><button id="workflow-edit-parcel" class="ghost" type="button">${lang==="de"?"Grenze bearbeiten":"Edit boundary"}</button><button id="workflow-delete-parcel" class="ghost danger" type="button">${lang==="de"?"Flurstück löschen":"Delete parcel"}</button></div>`);
@@ -284,20 +287,20 @@ function prepareFieldMap(){
     const initialParcel=fieldParcels?.features?.[0];if(initialParcel){fieldMap.setFilter("field-selected-parcel",["==",["id"],String(initialParcel.id)]);fieldMap.setFilter("field-selected-parcel-fill",["==",["id"],String(initialParcel.id)])}
     renderFieldNationalOverlay();
     renderFieldParcelOverlay();
-    focusFieldBuilding()
+    // The administrative-area selector owns the initial camera position.
   });
   let satelliteVisible=false,cadastralVisible=false,mapMode="normal";
   const setFieldMapMode=mode=>{
     mapMode=mode;cadastralVisible=mode==="cadastral";satelliteVisible=mode==="satellite";field3d=mode==="3d";
     const visible=(id,value)=>fieldMap.getLayer(id)&&fieldMap.setLayoutProperty(id,"visibility",value?"visible":"none");
-    visible("street-field",mode!=="satellite"&&mode!=="roads");visible("satellite",mode==="satellite");visible("field-cadastral-background",mode==="roads");
+    visible("street-field",mode!=="satellite");visible("satellite",mode==="satellite");visible("field-cadastral-background",false);
     visible("field-syria-outside-white",mode==="roads");visible("field-active-outside-gray",mode!=="roads");visible("field-active-boundary-casing",mode!=="roads");visible("field-active-boundary",mode!=="roads");visible("field-3d-governorate-boundaries",mode!=="roads"&&!selectedGovernorateBoundary);visible("field-3d-selected-boundary",false);
     visible("field-buildings-3d",mode==="3d");visible("field-buildings-flat",mode==="cadastral");
     ["field-cadastral-sections","field-cadastral-section-lines","field-cadastral-section-labels"].forEach(id=>visible(id,mode==="cadastral"));
     ["field-cadastral-parcels","field-cadastral-parcel-lines","field-cadastral-parcel-labels","field-cadastral-numbers"].forEach(id=>visible(id,mode==="cadastral"));
     ["field-cadastral-road-casing","field-cadastral-roads","field-cadastral-labels"].forEach(id=>visible(id,mode==="normal"||mode==="cadastral"||mode==="roads"));
     if(mode==="roads"){visible("field-buildings-flat",false);visible("field-cadastral-numbers",false)}
-    if(fieldMap.getLayer("street-field")){fieldMap.setPaintProperty("street-field","raster-saturation",mode==="roads"?-1:0);fieldMap.setPaintProperty("street-field","raster-opacity",mode==="roads"?.46:1)}
+    if(fieldMap.getLayer("street-field")){fieldMap.setPaintProperty("street-field","raster-saturation",mode==="roads"?-.35:0);fieldMap.setPaintProperty("street-field","raster-contrast",mode==="roads"?.12:0);fieldMap.setPaintProperty("street-field","raster-opacity",mode==="roads"?.92:1)}
     if(fieldMap.getLayer("field-cadastral-road-casing"))fieldMap.setPaintProperty("field-cadastral-road-casing","line-color",mode==="roads"?"#ffffff":"#7a3825");
     if(fieldMap.getLayer("field-cadastral-roads")){fieldMap.setPaintProperty("field-cadastral-roads","line-color",mode==="roads"?["match",["get","road_class"],"MOTORWAY","#c73f35","TRUNK","#d86c36","PRIMARY","#d69a32","SECONDARY","#49779a","#547867"]:"#efb66b");fieldMap.setPaintProperty("field-cadastral-roads","line-opacity",mode==="roads"?1:.96)}
     $("#cadastral-toolbar").classList.toggle("visible",mode==="cadastral");
