@@ -917,6 +917,24 @@ class Handler(BaseHTTPRequestHandler):
             building_file=PILOT_BUILDINGS
             if not building_file.exists(): return self.send_json({"error":"dataset_not_loaded"},503)
             return self.send_json(json.loads(building_file.read_text(encoding="utf-8")))
+        if path == "/api/v1/map/streets":
+            actor=self.require({"GOVERNORATE_ADMIN","MUNICIPAL_EDITOR","SURVEYOR","REVIEWER","APPROVER","AUDITOR","SYSTEM_ADMIN"})
+            if not actor:return
+            requested=parse_qs(parsed.query).get("admin_unit_id",[""])[0][:40]
+            scope=self.data_scope(actor,requested,allow_national=True)
+            if not scope:return
+            with db() as conn:
+                if scope=="ALL":
+                    rows=conn.execute("""SELECT * FROM streets WHERE geometry_geojson IS NOT NULL
+                        AND status IN ('ACTIVE','DRAFT') ORDER BY official_code""").fetchall()
+                else:
+                    units=scoped_admin_unit_ids(conn,scope);marks=",".join("?" for _ in units)
+                    rows=conn.execute(f"""SELECT * FROM streets WHERE geometry_geojson IS NOT NULL
+                        AND status IN ('ACTIVE','DRAFT') AND admin_unit_id IN ({marks}) ORDER BY official_code""",[*units]).fetchall()
+            return self.send_json({"type":"FeatureCollection","features":[{"type":"Feature","id":row["id"],
+                "geometry":json.loads(row["geometry_geojson"]),"properties":{"official_code":row["official_code"],
+                "name_ar":row["name_ar"],"name_en":row["name_en"],"road_class":row["road_class"],
+                "status":row["status"],"admin_unit_id":row["admin_unit_id"]}} for row in rows]})
         if path == "/api/v1/map/cadastre/buildings":
             actor=self.require({"GOVERNORATE_ADMIN","MUNICIPAL_EDITOR","SYSTEM_ADMIN"})
             if not actor:return
