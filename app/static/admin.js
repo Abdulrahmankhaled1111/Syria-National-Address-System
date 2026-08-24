@@ -53,7 +53,7 @@ $("#submit-house-number").onclick=async()=>{const button=$("#submit-house-number
 Object.assign(messages.ar,{locateDoor:"موقعي عند الباب",field3d:"عرض ثلاثي الأبعاد",doorPosition:"موضع باب المنزل",gpsWaiting:"حدد موقعك عند الباب.",dragDoor:"يمكن سحب العلامة إلى موضع الباب الصحيح.",gpsAccuracy:"دقة GPS"});
 Object.assign(messages.en,{locateDoor:"My position at the door",field3d:"3D view",doorPosition:"House-door position",gpsWaiting:"Determine your position at the door.",dragDoor:"Drag the marker to the correct door position.",gpsAccuracy:"GPS accuracy"});
 Object.assign(messages.de,{locateDoor:"Mein Standort an der Haustür",field3d:"3D-Ansicht",doorPosition:"Position der Haustür",gpsWaiting:"Standort direkt an der Haustür bestimmen.",dragDoor:"Die Markierung kann auf die genaue Haustür verschoben werden.",gpsAccuracy:"GPS-Genauigkeit"});
-let fieldMap,fieldBuildings,fieldRoads,fieldNumbers,fieldSections,fieldParcels,fieldBoundary,fieldGovernorates,selectedGovernorateBoundary,doorMarker,gpsMarker,fieldParcelOverlay,fieldNationalOverlay,field3d=false,lastGps=null,doorPosition=null,activeAdminUnitId="",refreshChangeGraphics=()=>{};
+let fieldMap,fieldBuildings,fieldRoads,fieldNumbers,fieldSections,fieldParcels,fieldBoundary,fieldGovernorates,selectedGovernorateBoundary,doorMarker,gpsMarker,governorateStartMarker,fieldParcelOverlay,fieldNationalOverlay,field3d=false,lastGps=null,doorPosition=null,activeAdminUnitId="",refreshChangeGraphics=()=>{},focusActiveAdminArea=()=>{};
 function fieldOutsideSyriaMask(boundary){
   const feature=boundary?.features?.[0]||boundary,geometry=feature?.geometry;
   if(!geometry||!["Polygon","MultiPolygon"].includes(geometry.type))return {type:"FeatureCollection",features:[]};
@@ -163,6 +163,29 @@ function prepareFieldMap(){
   governoratePanel.innerHTML=`<div><strong>${lang==="ar"?"نطاق الإدارة":lang==="de"?"Verwaltungsbereich":"Administrative area"}</strong><small>${lang==="ar"?"كل محافظة لها رقم وصلاحيات مستقلة":lang==="de"?"Jedes Gouvernement besitzt eine eigene Kennung und getrennte Zugriffsrechte.":"Each governorate has its own code and access scope."}</small></div><select id="governorate-scope"><option value="">${lang==="ar"?"تحميل المحافظات…":lang==="de"?"Gouvernements werden geladen …":"Loading governorates …"}</option></select><button id="governorate-show" type="button">${lang==="ar"?"عرض منفصل":lang==="de"?"Allein auf Karte anzeigen":"Show separately"}</button><span id="governorate-access-note"></span>`;
   workflow.before(governoratePanel);
   let governorates=[];
+  focusActiveAdminArea=(duration=0)=>{
+    // Camera changes are valid while raster tiles are still loading. Waiting for
+    // map.loaded() left the hard-coded pilot camera active on slow connections.
+    if(!fieldMap)return;
+    const selected=$("#governorate-scope")?.value||activeAdminUnitId;
+    if(!selected)return;
+    fieldMap.stop();fieldMap.setMaxBounds(null);
+    if(selected==="ALL"){
+      governorateStartMarker?.remove();governorateStartMarker=null;
+      const national=fieldBoundary?.features?.[0]||fieldBoundary,bounds=new maplibregl.LngLatBounds();
+      const add=value=>{if(Array.isArray(value)&&typeof value[0]==="number")bounds.extend(value);else if(Array.isArray(value))value.forEach(add)};
+      if(national?.geometry)add(national.geometry.coordinates);
+      if(!bounds.isEmpty())fieldMap.fitBounds(bounds,{padding:35,maxZoom:6.8,pitch:0,bearing:0,duration});
+      return;
+    }
+    const item=governorates.find(entry=>entry.id===selected);if(!item)return;
+    selectedGovernorateBoundary=fieldGovernorates?.features?.find(feature=>feature.id===selected)||selectedGovernorateBoundary;
+    if(!governorateStartMarker){const element=document.createElement("div");element.className="governorate-start-marker";element.title=lang==="de"?"Startpunkt des ausgewählten Gouvernements":"Selected governorate start point";governorateStartMarker=new maplibregl.Marker({element,anchor:"center"}).setLngLat([item.longitude,item.latitude]).addTo(fieldMap)}else governorateStartMarker.setLngLat([item.longitude,item.latitude]);
+    if(selectedGovernorateBoundary){
+      const bounds=new maplibregl.LngLatBounds(),add=value=>{if(Array.isArray(value)&&typeof value[0]==="number")bounds.extend(value);else if(Array.isArray(value))value.forEach(add)};add(selectedGovernorateBoundary.geometry.coordinates);
+      fieldMap.fitBounds(bounds,{padding:{top:90,bottom:54,left:54,right:54},maxZoom:10.8,pitch:0,bearing:0,duration});
+    }else fieldMap.jumpTo({center:[item.longitude,item.latitude],zoom:item.zoom,pitch:0,bearing:0});
+  };
   api("/api/v1/admin/governorates").then(([response,data])=>{
     if(!response.ok)return;
     governorates=data;
@@ -177,6 +200,7 @@ function prepareFieldMap(){
     selectedGovernorateBoundary=selected&&selected!=="ALL"?data.features?.find(feature=>feature.id===selected)||null:null;
     syncFieldBoundarySources();
     renderFieldNationalOverlay();
+    focusActiveAdminArea(0);
   });
   $("#governorate-scope").onchange=()=>$("#governorate-show").click();
   $("#governorate-show").onclick=async()=>{
@@ -185,8 +209,7 @@ function prepareFieldMap(){
     if(selected==="ALL"){
       activeAdminUnitId="ALL";
       selectedGovernorateBoundary=null;fieldMap.setMaxBounds(null);syncFieldBoundarySources();renderFieldNationalOverlay();
-      const bounds=new maplibregl.LngLatBounds();const add=value=>{if(Array.isArray(value)&&typeof value[0]==="number")bounds.extend(value);else if(Array.isArray(value))value.forEach(add)};add((fieldBoundary.features?.[0]||fieldBoundary).geometry.coordinates);
-      fieldMap.fitBounds(bounds,{padding:35,maxZoom:6.8,pitch:0,bearing:0,duration:900});$("#governorate-access-note").textContent=lang==="de"?"Nationaler Administrator · Zugriff auf alle 14 Gouvernements":"National administrator · access to all 14 governorates";
+      focusActiveAdminArea(900);$("#governorate-access-note").textContent=lang==="de"?"Nationaler Administrator · Zugriff auf alle 14 Gouvernements":"National administrator · access to all 14 governorates";
       $(".cad-title>span:nth-child(2)").textContent=lang==="ar"?"البوابة الجغرافية الوطنية السورية":lang==="de"?"Nationales Geoportal Syrien":"Syrian National Geoportal";
       $(".workflow-head span").textContent=lang==="de"?"Syrien · 14 getrennte Verwaltungsbereiche":"Syria · 14 separate administrative areas";
       $("#active-register-label").textContent=lang==="ar"?"سوريا · السجل الوطني":lang==="de"?"Syrien · Nationales Register":"Syria · National register";
@@ -200,15 +223,7 @@ function prepareFieldMap(){
     selectedGovernorateBoundary=fieldGovernorates?.features?.find(feature=>feature.id===item.id)||null;
     syncFieldBoundarySources();
     renderFieldNationalOverlay();
-    if(selectedGovernorateBoundary){
-      const bounds=new maplibregl.LngLatBounds();
-      const add=value=>{if(Array.isArray(value)&&typeof value[0]==="number")bounds.extend(value);else if(Array.isArray(value))value.forEach(add)};
-      add(selectedGovernorateBoundary.geometry.coordinates);
-      // The boundary controls data access and the white outside mask. It must not
-      // lock the camera, otherwise narrow governorates cannot be freely explored.
-      fieldMap.setMaxBounds(null);
-      fieldMap.fitBounds(bounds,{padding:{top:32,bottom:32,left:38,right:38},maxZoom:10.8,pitch:0,bearing:0,duration:900});
-    }else fieldMap.flyTo({center:[item.longitude,item.latitude],zoom:item.zoom,pitch:0,bearing:0,duration:900});
+    focusActiveAdminArea(900);
     $("#governorate-access-note").textContent=`${item.official_code} · ${lang==="ar"?item.name_ar:item.name_en} · ${lang==="de"?"eigener Verwaltungsbereich":"separate administrative scope"}`;
     $(".cad-title>span:nth-child(2)").textContent=lang==="ar"?`البوابة الجغرافية · ${item.name_ar}`:lang==="de"?`Geoportal · Gouvernement ${item.name_en}`:`Geoportal · ${item.name_en} Governorate`;
     $(".workflow-head span").textContent=`Syrien → ${lang==="ar"?item.name_ar:item.name_en}`;
@@ -288,7 +303,8 @@ function prepareFieldMap(){
     const initialParcel=fieldParcels?.features?.[0];if(initialParcel){fieldMap.setFilter("field-selected-parcel",["==",["id"],String(initialParcel.id)]);fieldMap.setFilter("field-selected-parcel-fill",["==",["id"],String(initialParcel.id)])}
     renderFieldNationalOverlay();
     renderFieldParcelOverlay();
-    // The administrative-area selector owns the initial camera position.
+    // Re-apply after the WebGL style is fully ready; this wins every startup race.
+    setTimeout(()=>focusActiveAdminArea(0),0);
   });
   let satelliteVisible=false,cadastralVisible=false,mapMode="normal";
   const setFieldMapMode=mode=>{
@@ -722,7 +738,7 @@ function openPortalPage(name){
   document.querySelectorAll(".portal-page").forEach(page=>page.classList.toggle("hidden",page.id!==`page-${name}`));
   document.querySelectorAll(".portal-nav button").forEach(button=>button.classList.toggle("active",button.dataset.page===name));
   if(name==="settings"){loadSystemSettings();loadGoogleExportStatus()}if(name==="support")loadSupportTickets();if(name==="search")runDataFilter();if(name==="collaboration")loadCollaborationHub();
-  setTimeout(()=>fieldMap&&fieldMap.resize(),0);
+  setTimeout(()=>{if(!fieldMap)return;fieldMap.resize();if(name==="register")focusActiveAdminArea(0)},0);
 }
 async function loadCollaborationHub(){
   if(!$("#collaboration-cases")||!token)return;
