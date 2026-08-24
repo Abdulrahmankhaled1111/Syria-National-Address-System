@@ -29,9 +29,9 @@
 .change-graphics-body::before{content:"";grid-column:1/-1;justify-self:center;width:12px;height:16px;background:radial-gradient(circle at 6px 8px,#66736c 0 5px,transparent 5.5px)}
 .change-graphics-track{gap:12px;justify-content:center;overflow:hidden;scrollbar-width:none;padding:0}
 .change-graphics-track::-webkit-scrollbar{display:none}
-.change-graphic-card{flex:0 0 138px;display:block;padding:0;border:1px solid transparent;background:#fff}
+.change-graphic-card{flex:0 0 150px;display:grid;grid-template-rows:80px auto auto;gap:3px;padding:5px;border:1px solid transparent;background:#fff;text-align:start}
 .change-graphic-card:hover,.change-graphic-card.active{border-color:#5c7468;background:#fff}
-.change-graphic-card>strong,.change-graphic-card>small{display:none}
+.change-graphic-card>strong{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px;color:#29483a}.change-graphic-card>small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:8px;color:#718078}
 .change-graphic-preview{height:80px;border-color:#aeb6b2}
 .change-graphics-nav{width:32px;height:36px;border-color:#d5dad7;border-radius:3px;background:#f3f5f4;font-size:23px}
 .change-graphics-drawer.collapsed{width:190px;border-radius:6px 6px 0 0;box-shadow:0 2px 8px #17251e1f}

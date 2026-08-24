@@ -32,6 +32,9 @@ Arbeitszentrale für gemeinsame Behördenvorgänge. Bauämter können prüfbare
 ohne gegenseitig uneingeschränkten Registerzugriff zu erhalten. Details und
 Statusmodell: [`docs/INTER_AUTHORITY_COLLABORATION.md`](docs/INTER_AUTHORITY_COLLABORATION.md).
 
+Straßennetz-, Kataster- und Mehrfacheigentümer-Importe:
+[`docs/STREET_AND_PROPERTY_IMPORT.md`](docs/STREET_AND_PROPERTY_IMPORT.md).
+
 ## Produktionsmodus
 
 Version 0.17 führt einen abgesicherten Produktionsmodus ein. Er verweigert den

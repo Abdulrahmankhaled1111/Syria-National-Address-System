@@ -193,6 +193,22 @@ class ApiTest(unittest.TestCase):
         status,parcels=call("/api/v1/map/zabadani/parcels",token=admin)
         self.assertEqual(status,200);self.assertEqual(len(parcels["features"]),1)
         self.assertEqual(parcels["features"][0]["properties"]["parcel_number"],"12/3")
+    def test_official_street_import_preserves_class_names_geometry_and_draft_status(self):
+        collection={"type":"FeatureCollection","admin_unit_id":"au-zab","source_name":"Municipal road register",
+            "features":[{"type":"Feature","properties":{"official_code":"SY-RD-ZAB-STR-000001",
+                "name_ar":"طريق دمشق","name_en":"Damascus Road","road_class":"PRIMARY",
+                "former_names":["الطريق القديم"]},"geometry":{"type":"LineString","coordinates":[
+                    [36.096,33.721],[36.102,33.728]]}}]}
+        editor=self.login("zabadani.editor","Zabadani123!")
+        self.assertEqual(call("/api/v1/streets/import","POST",collection,editor)[0],403)
+        admin=self.login("admin","Admin123!")
+        status,result=call("/api/v1/streets/import","POST",collection,admin)
+        self.assertEqual(status,201);self.assertEqual(result["created"],1);self.assertEqual(result["status"],"DRAFT")
+        status,streets=call("/api/v1/streets",token=admin)
+        self.assertEqual(status,200)
+        street=next(item for item in streets if item["official_code"]=="SY-RD-ZAB-STR-000001")
+        self.assertEqual(street["road_class"],"PRIMARY")
+        self.assertEqual(street["former_names"],["الطريق القديم"])
     def test_municipality_can_capture_parcel_as_reviewable_draft(self):
         editor=self.login("zabadani.editor","Zabadani123!")
         body={"section_number":"2","parcel_number":"44","quality_level":"D","geometry":{"type":"Polygon",
@@ -222,15 +238,19 @@ class ApiTest(unittest.TestCase):
             [36.2910,33.5130],[36.2900,33.5120]]]}
         status,parcel=call("/api/v1/cadastre/zabadani/parcels/capture","POST",{
             "admin_unit_id":"au-di","section_number":section["section_number"],"parcel_number":"1",
-            "quality_level":"D","geometry":parcel_geometry,"owner_name":"Protected Test Owner",
-            "owner_reference":"DAM-REG-1001","owner_share_percent":100,
-            "owner_source_document":"Municipal file 1001"},admin)
+            "quality_level":"D","geometry":parcel_geometry,"owners":[
+                {"owner_name":"Protected Test Owner","owner_reference":"DAM-REG-1001",
+                 "owner_address":"Damascus, protected address 1","share_percent":60,"source_document":"Municipal file 1001"},
+                {"owner_name":"Second Protected Owner","owner_reference":"DAM-REG-1002",
+                 "owner_address":"Damascus, protected address 2","share_percent":40,"source_document":"Municipal file 1001"}]},admin)
         self.assertEqual(status,201)
         self.assertGreater(parcel["area_m2"],1000)
         self.assertEqual(call(f"/api/v1/cadastre/parcels/{parcel['id']}/record")[0],401)
         status,record=call(f"/api/v1/cadastre/parcels/{parcel['id']}/record",token=admin)
         self.assertEqual(status,200);self.assertEqual(record["classification"],"PROTECTED_INTERNAL")
-        self.assertEqual(record["ownership"]["owner_name"],"Protected Test Owner")
+        self.assertEqual(len(record["owners"]),2)
+        self.assertEqual(sum(owner["share_percent"] for owner in record["owners"]),100)
+        self.assertTrue(all(owner["owner_address"] for owner in record["owners"]))
         outside_geometry={"type":"Polygon","coordinates":[[[36.3000,33.5200],[36.3010,33.5200],
             [36.3010,33.5210],[36.3000,33.5200]]]}
         self.assertEqual(call("/api/v1/cadastre/zabadani/parcels/capture","POST",{

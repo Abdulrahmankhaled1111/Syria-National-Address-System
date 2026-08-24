@@ -97,7 +97,8 @@ CREATE TABLE IF NOT EXISTS admin_units (
 CREATE TABLE IF NOT EXISTS streets (
  id TEXT PRIMARY KEY, official_code TEXT UNIQUE NOT NULL, admin_unit_id TEXT NOT NULL REFERENCES admin_units(id),
  name_ar TEXT NOT NULL, name_en TEXT, former_names TEXT NOT NULL DEFAULT '[]',
- status TEXT NOT NULL DEFAULT 'ACTIVE'
+ status TEXT NOT NULL DEFAULT 'ACTIVE', road_class TEXT NOT NULL DEFAULT 'LOCAL',
+ geometry_geojson TEXT, source_name TEXT, imported_at TEXT
 );
 CREATE TABLE IF NOT EXISTS buildings (
  id TEXT PRIMARY KEY, official_code TEXT UNIQUE NOT NULL, admin_unit_id TEXT NOT NULL REFERENCES admin_units(id),
@@ -246,7 +247,7 @@ CREATE TABLE IF NOT EXISTS parcels (
 );
 CREATE TABLE IF NOT EXISTS parcel_ownership_records (
  id TEXT PRIMARY KEY, parcel_id TEXT NOT NULL REFERENCES parcels(id),
- owner_name TEXT NOT NULL, owner_reference TEXT, share_percent REAL NOT NULL DEFAULT 100,
+ owner_name TEXT NOT NULL, owner_address TEXT, owner_reference TEXT, share_percent REAL NOT NULL DEFAULT 100,
  source_document TEXT, status TEXT NOT NULL DEFAULT 'DRAFT',
  valid_from TEXT NOT NULL, valid_to TEXT, created_by TEXT NOT NULL REFERENCES users(id)
 );
@@ -294,28 +295,41 @@ def geometry_area_m2(geometry) -> float:
     return round(max(0.0,total),2)
 
 def ownership_payload(data):
-    owner_name=str(data.get("owner_name","")).strip()[:240]
-    if not owner_name:
-        return None
-    try: share_percent=float(data.get("owner_share_percent",100))
-    except (TypeError,ValueError): raise ValueError("invalid_owner_share")
-    if not 0 < share_percent <= 100:raise ValueError("invalid_owner_share")
-    return {"owner_name":owner_name,
-        "owner_reference":str(data.get("owner_reference","")).strip()[:160] or None,
-        "share_percent":round(share_percent,4),
-        "source_document":str(data.get("owner_source_document","")).strip()[:240] or None}
+    raw=data.get("owners")
+    if raw is None:
+        raw=[{"owner_name":data.get("owner_name"),"owner_address":data.get("owner_address"),"owner_reference":data.get("owner_reference"),
+              "share_percent":data.get("owner_share_percent",100),
+              "source_document":data.get("owner_source_document")}] if str(data.get("owner_name","")).strip() else []
+    if not isinstance(raw,list) or len(raw)>50:raise ValueError("invalid_owners")
+    owners=[]
+    for item in raw:
+        if not isinstance(item,dict):raise ValueError("invalid_owner")
+        owner_name=str(item.get("owner_name","")).strip()[:240]
+        if not owner_name:raise ValueError("owner_name_required")
+        try: share_percent=float(item.get("share_percent",100))
+        except (TypeError,ValueError):raise ValueError("invalid_owner_share")
+        if not 0 < share_percent <= 100:raise ValueError("invalid_owner_share")
+        owners.append({"owner_name":owner_name,
+            "owner_address":str(item.get("owner_address","")).strip()[:500] or None,
+            "owner_reference":str(item.get("owner_reference","")).strip()[:160] or None,
+            "share_percent":round(share_percent,4),
+            "source_document":str(item.get("source_document","")).strip()[:240] or None})
+    if owners and sum(item["share_percent"] for item in owners)>100.0001:raise ValueError("owner_shares_exceed_100")
+    return owners
 
 def replace_parcel_ownership(conn,parcel_id,ownership,actor_id,stamp):
     if not ownership:return None
     conn.execute("UPDATE parcel_ownership_records SET valid_to=? WHERE parcel_id=? AND valid_to IS NULL",
                  (stamp,parcel_id))
-    record_id="own-"+uuid.uuid4().hex[:20]
-    conn.execute("""INSERT INTO parcel_ownership_records
-        (id,parcel_id,owner_name,owner_reference,share_percent,source_document,status,valid_from,valid_to,created_by)
-        VALUES(?,?,?,?,?,?,'DRAFT',?,NULL,?)""",
-        (record_id,parcel_id,ownership["owner_name"],ownership["owner_reference"],
-         ownership["share_percent"],ownership["source_document"],stamp,actor_id))
-    return record_id
+    record_ids=[]
+    for owner in ownership:
+        record_id="own-"+uuid.uuid4().hex[:20];record_ids.append(record_id)
+        conn.execute("""INSERT INTO parcel_ownership_records
+            (id,parcel_id,owner_name,owner_address,owner_reference,share_percent,source_document,status,valid_from,valid_to,created_by)
+            VALUES(?,?,?,?,?,?,?,'DRAFT',?,NULL,?)""",
+            (record_id,parcel_id,owner["owner_name"],owner["owner_address"],owner["owner_reference"],
+             owner["share_percent"],owner["source_document"],stamp,actor_id))
+    return record_ids
 
 def seed_governorates(conn):
     conn.executemany("""INSERT OR IGNORE INTO admin_units
@@ -506,6 +520,10 @@ def init_db(reset=False):
         building_columns={row["name"] for row in conn.execute("PRAGMA table_info(buildings)")}
         if "dwelling_units" not in building_columns:
             conn.execute("ALTER TABLE buildings ADD COLUMN dwelling_units INTEGER")
+        street_columns={row["name"] for row in conn.execute("PRAGMA table_info(streets)")}
+        for column,definition in (("road_class","TEXT NOT NULL DEFAULT 'LOCAL'"),("geometry_geojson","TEXT"),
+                                  ("source_name","TEXT"),("imported_at","TEXT")):
+            if column not in street_columns:conn.execute(f"ALTER TABLE streets ADD COLUMN {column} {definition}")
         case_columns={row["name"] for row in conn.execute("PRAGMA table_info(house_number_cases)")}
         for column in ("floors","dwelling_units"):
             if column not in case_columns:
@@ -531,6 +549,8 @@ def init_db(reset=False):
         parcel_columns={row["name"] for row in conn.execute("PRAGMA table_info(parcels)")}
         if "area_m2" not in parcel_columns:
             conn.execute("ALTER TABLE parcels ADD COLUMN area_m2 REAL")
+        ownership_columns={row["name"] for row in conn.execute("PRAGMA table_info(parcel_ownership_records)")}
+        if "owner_address" not in ownership_columns:conn.execute("ALTER TABLE parcel_ownership_records ADD COLUMN owner_address TEXT")
         conn.execute("""CREATE INDEX IF NOT EXISTS ix_parcel_ownership_active
             ON parcel_ownership_records(parcel_id,valid_to)""")
         for table,column in (("cadastral_sections","geometry_geojson"),("parcels","geometry_geojson"),
@@ -649,7 +669,8 @@ def init_db(reset=False):
             ("usr-zab-editor","au-zab",now()),("usr-zab-surveyor","au-zab",now()),
             ("usr-zab-reviewer","au-zab",now()),("usr-zab-approver","au-zab",now()),
             ("usr-zab-installer","au-zab",now()),("usr-zab-registry","au-zab",now())])
-        conn.execute("INSERT INTO streets VALUES(?,?,?,?,?,?,?)",
+        conn.execute("""INSERT INTO streets(id,official_code,admin_unit_id,name_ar,name_en,former_names,status)
+            VALUES(?,?,?,?,?,?,?)""",
             ("str-sh-001","SY-DI-MD-STR-000001","au-sh","شارع الحمراء","Al-Hamra Street","[]","ACTIVE"))
         building_geo = {"type":"Polygon","coordinates":[[[36.2895,33.5166],[36.2898,33.5166],[36.2898,33.5168],[36.2895,33.5168],[36.2895,33.5166]]]}
         conn.execute("INSERT INTO buildings VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
@@ -1159,18 +1180,19 @@ class Handler(BaseHTTPRequestHandler):
                     scope=governorate if actor["role"]=="GOVERNORATE_ADMIN" else (profile["admin_unit_id"] if profile else None)
                     if not scope or parcel["admin_unit_id"] not in scoped_admin_unit_ids(conn,scope):
                         return self.send_json({"error":"outside_assigned_governorate"},403)
-                ownership=conn.execute("""SELECT id,owner_name,owner_reference,share_percent,
+                ownership=conn.execute("""SELECT id,owner_name,owner_address,owner_reference,share_percent,
                     source_document,status,valid_from FROM parcel_ownership_records
-                    WHERE parcel_id=? AND valid_to IS NULL ORDER BY valid_from DESC LIMIT 1""",
-                    (parcel["id"],)).fetchone()
+                    WHERE parcel_id=? AND valid_to IS NULL ORDER BY owner_name""",
+                    (parcel["id"],)).fetchall()
                 buildings=conn.execute("""SELECT id,technical_code,object_number,footprint_area_m2,
                     official_status FROM building_catalog WHERE parcel_id=?
                     ORDER BY CAST(object_number AS INTEGER),object_number""",(parcel["id"],)).fetchall()
                 audit(conn,actor["id"],"READ_PROTECTED_REGISTER","PARCEL",parcel["id"],None,
-                      {"record_type":"ownership","ownership_record_present":bool(ownership)})
+                      {"record_type":"ownership","ownership_record_count":len(ownership)})
             result=dict(parcel);result.pop("geometry_geojson",None)
             return self.send_json({"classification":"PROTECTED_INTERNAL","parcel":result,
-                "ownership":dict(ownership) if ownership else None,
+                "owners":[dict(row) for row in ownership],
+                "ownership":dict(ownership[0]) if ownership else None,
                 "buildings":[dict(row) for row in buildings]})
         if path in ("/api/v1/exports/google-addresses.kml","/api/v1/exports/google-addresses.csv",
                     "/api/v1/exports/google-addresses/validation"):
@@ -1357,6 +1379,22 @@ class Handler(BaseHTTPRequestHandler):
             with db() as conn:rows=conn.execute("""SELECT z.*,u.name_ar admin_name_ar,u.name_en admin_name_en
                 FROM postal_areas z JOIN admin_units u ON u.id=z.admin_unit_id ORDER BY z.postal_code""").fetchall()
             return self.send_json([dict(row)|{"label":f"{row['postal_code']} {row['locality_en']}"} for row in rows])
+        if path == "/api/v1/streets":
+            actor=self.require({"GOVERNORATE_ADMIN","MUNICIPAL_EDITOR","SURVEYOR","REVIEWER","APPROVER","AUDITOR","SYSTEM_ADMIN"})
+            if not actor:return
+            with db() as conn:
+                if actor["role"]=="SYSTEM_ADMIN":
+                    rows=conn.execute("""SELECT id,official_code,admin_unit_id,name_ar,name_en,former_names,
+                        status,road_class,source_name,imported_at FROM streets ORDER BY admin_unit_id,name_ar""").fetchall()
+                else:
+                    profile=conn.execute("SELECT admin_unit_id FROM staff_profiles WHERE user_id=?",(actor["id"],)).fetchone()
+                    units=scoped_admin_unit_ids(conn,profile["admin_unit_id"]) if profile and profile["admin_unit_id"] else set()
+                    if not units:return self.send_json([])
+                    marks=",".join("?" for _ in units)
+                    rows=conn.execute(f"""SELECT id,official_code,admin_unit_id,name_ar,name_en,former_names,
+                        status,road_class,source_name,imported_at FROM streets WHERE admin_unit_id IN ({marks})
+                        ORDER BY name_ar""",[*units]).fetchall()
+            return self.send_json([dict(row)|{"former_names":json.loads(row["former_names"] or "[]")} for row in rows])
         if path == "/api/v1/settings":
             actor=self.require({"MUNICIPAL_EDITOR","SURVEYOR","REVIEWER","APPROVER","PRINT_OFFICER",
                                 "INSTALLER","AUDITOR","SYSTEM_ADMIN"})
@@ -1777,6 +1815,53 @@ class Handler(BaseHTTPRequestHandler):
                     (new_status,actor["id"],resolution,now(),row["id"]))
                 audit(conn,actor["id"],action.upper(),"collaboration_case",row["id"],dict(row),{"status":new_status,"resolution":resolution})
             return self.send_json({"id":m.group(1),"status":new_status})
+        if path == "/api/v1/streets/import":
+            actor=self.require({"SYSTEM_ADMIN"})
+            if not actor:return
+            if data.get("type")!="FeatureCollection" or not isinstance(data.get("features"),list):
+                return self.send_json({"error":"geojson_feature_collection_required"},422)
+            if not data["features"] or len(data["features"])>20000:
+                return self.send_json({"error":"invalid_feature_count","maximum":20000},422)
+            admin_unit_id=str(data.get("admin_unit_id","")).strip()[:80]
+            source_name=str(data.get("source_name","OFFICIAL_AUTHORITY_IMPORT")).strip()[:160]
+            allowed_classes={"MOTORWAY","TRUNK","PRIMARY","SECONDARY","TERTIARY","LOCAL","SERVICE","PEDESTRIAN"}
+            prepared=[]
+            for index,feature in enumerate(data["features"]):
+                geometry=feature.get("geometry") if isinstance(feature,dict) else None
+                properties=feature.get("properties",{}) if isinstance(feature,dict) else {}
+                if not isinstance(geometry,dict) or geometry.get("type") not in {"LineString","MultiLineString"}:
+                    return self.send_json({"error":"invalid_street_geometry","feature_index":index},422)
+                name_ar=str(properties.get("name_ar","")).strip()[:240]
+                name_en=str(properties.get("name_en","")).strip()[:240] or None
+                official_code=str(properties.get("official_code","")).strip()[:80]
+                road_class=str(properties.get("road_class","LOCAL")).upper()
+                former=properties.get("former_names",[])
+                if not official_code or not name_ar:return self.send_json({"error":"street_code_and_arabic_name_required","feature_index":index},422)
+                if road_class not in allowed_classes:return self.send_json({"error":"invalid_road_class","feature_index":index},422)
+                if not isinstance(former,list):return self.send_json({"error":"former_names_must_be_array","feature_index":index},422)
+                prepared.append((official_code,name_ar,name_en,road_class,former,geometry))
+            created=updated=0;stamp=now()
+            with db() as conn:
+                if not conn.execute("SELECT 1 FROM admin_units WHERE id=?",(admin_unit_id,)).fetchone():
+                    return self.send_json({"error":"admin_unit_not_found"},422)
+                for official_code,name_ar,name_en,road_class,former,geometry in prepared:
+                    previous=conn.execute("SELECT * FROM streets WHERE official_code=?",(official_code,)).fetchone()
+                    values=(admin_unit_id,name_ar,name_en,json.dumps(former,ensure_ascii=False),"DRAFT",road_class,
+                            json.dumps(geometry,ensure_ascii=False,separators=(",",":")),source_name,stamp,official_code)
+                    if previous:
+                        conn.execute("""UPDATE streets SET admin_unit_id=?,name_ar=?,name_en=?,former_names=?,status=?,
+                            road_class=?,geometry_geojson=?,source_name=?,imported_at=? WHERE official_code=?""",values)
+                        audit(conn,actor["id"],"IMPORT_UPDATE","street",previous["id"],dict(previous),
+                              {"official_code":official_code,"name_ar":name_ar,"road_class":road_class,"status":"DRAFT"});updated+=1
+                    else:
+                        street_id="str-"+uuid.uuid5(uuid.NAMESPACE_URL,official_code).hex[:20]
+                        conn.execute("""INSERT INTO streets(id,admin_unit_id,name_ar,name_en,former_names,status,
+                            road_class,geometry_geojson,source_name,imported_at,official_code) VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+                            (street_id,*values[:-1],official_code))
+                        audit(conn,actor["id"],"IMPORT_CREATE","street",street_id,None,
+                              {"official_code":official_code,"name_ar":name_ar,"road_class":road_class,"status":"DRAFT"});created+=1
+            return self.send_json({"created":created,"updated":updated,"status":"DRAFT",
+                "next_step":"NAME_GEOMETRY_AND_AUTHORITY_REVIEW"},201)
         if path == "/api/v1/cadastre/zabadani/parcels/import":
             actor=self.require({"SYSTEM_ADMIN"})
             if not actor:return

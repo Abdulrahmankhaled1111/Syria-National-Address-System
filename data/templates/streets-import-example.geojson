@@ -1,0 +1,21 @@
+{
+  "type": "FeatureCollection",
+  "admin_unit_id": "au-zab",
+  "source_name": "Official municipal road register",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "official_code": "SY-RD-ZAB-STR-000001",
+        "name_ar": "طريق دمشق",
+        "name_en": "Damascus Road",
+        "road_class": "PRIMARY",
+        "former_names": []
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [[36.096, 33.721], [36.102, 33.728]]
+      }
+    }
+  ]
+}
