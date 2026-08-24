@@ -7,6 +7,14 @@ Arabisch, Englisch und Deutsch. Er unterstützt Beschäftigte bei Adressierung,
 Kataster, Rollen, Freigabeworkflow, Datenqualität, Sicherheit und Offline-
 Betrieb. Antworten sind Beratungshilfen und keine amtlichen Entscheidungen.
 
+Die Wissensbasis `2026.08.2` deckt zusätzlich Anmeldung und Profil, Navigation,
+Aufgaben und Benachrichtigungen, Karten und Suche, Flur-/Flurstückserfassung,
+Gebäude und Außendienst, PDF/GeoJSON/KML/CSV-Exporte, Backup und Restore,
+Systemeinstellungen, Support sowie den tatsächlichen Produktionsstatus ab.
+Unbekannte Fragen erhalten eine Systemübersicht statt einer erfundenen
+Detailantwort. Jede Antwort liefert Themenkennung, Quellen, Wissensversion und
+den technischen Isolationsstatus.
+
 ## Technische Sicherheitsgrenze
 
 ```text

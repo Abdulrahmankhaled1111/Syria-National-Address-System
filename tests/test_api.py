@@ -90,6 +90,32 @@ class ApiTest(unittest.TestCase):
         self.assertIn("keine Daten ändern",data["answer"])
         self.assertEqual(call("/api/v1/assistant/query","POST",{"question":"","language":"de"},editor)[0],422)
 
+    def test_staff_assistant_covers_core_system_handbook(self):
+        editor=self.login("zabadani.editor","Zabadani123!")
+        cases={
+            "Wie melde ich mich an und wo ist mein Profil?":"login_profile",
+            "Wie finde ich ein Gebäude auf der Karte?":"search_map",
+            "Wie erfasse ich eine Flur und ein Flurstück?":"parcel_capture",
+            "Was muss der Außendienst bei der Montage dokumentieren?":"building_fieldwork",
+            "Was bedeuten meine Aufgaben und Benachrichtigungen?":"tasks_notifications",
+            "Welche Daten dürfen als PDF oder KML exportiert werden?":"documents_exports",
+            "Wie funktionieren Backup und Wiederherstellung?":"backup_recovery",
+            "Wo finde ich Einstellungen und Support?":"settings_support",
+            "Ist das System schon für den Staat produktionsbereit?":"production_status"
+        }
+        for question,topic in cases.items():
+            with self.subTest(question=question):
+                status,data=call("/api/v1/assistant/query","POST",{"question":question,"language":"de"},editor)
+                self.assertEqual(status,200)
+                self.assertIn(topic,data["topics"])
+                self.assertGreaterEqual(data["knowledge_topics"],17)
+                self.assertTrue(data["matched"])
+                self.assertTrue(data["sources"])
+        status,data=call("/api/v1/assistant/query","POST",{
+            "question":"Wie genehmige ich einen geprüften Vorgang?","language":"de"},editor)
+        self.assertEqual(status,200)
+        self.assertNotIn("Ich kann keine Daten ändern",data["answer"])
+
     def test_system_settings_entry_is_in_administrator_profile(self):
         status,_,html=call_raw("/admin")
         self.assertEqual(status,200)
