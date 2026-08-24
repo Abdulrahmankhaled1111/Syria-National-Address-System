@@ -94,6 +94,8 @@ class ApiTest(unittest.TestCase):
         status,_,html=call_raw("/admin")
         self.assertEqual(status,200)
         self.assertIn(b'id="profile-settings"',html)
+        for entry in (b'profile-tasks',b'profile-search',b'profile-assistant',b'profile-support',b'profile-about'):
+            self.assertIn(entry,html)
         status,_,script=call_raw("/static/admin.js")
         self.assertEqual(status,200)
         self.assertIn(b'openPortalPage("settings")',script)
