@@ -1,6 +1,7 @@
 .env
 pilot.db
 *.pid
+*.log
 backups/
 data/backups/
 output/
