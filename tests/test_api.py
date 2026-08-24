@@ -89,6 +89,15 @@ class ApiTest(unittest.TestCase):
         self.assertEqual(status,200)
         self.assertIn("keine Daten ändern",data["answer"])
         self.assertEqual(call("/api/v1/assistant/query","POST",{"question":"","language":"de"},editor)[0],422)
+
+    def test_system_settings_entry_is_in_administrator_profile(self):
+        status,_,html=call_raw("/admin")
+        self.assertEqual(status,200)
+        self.assertIn(b'id="profile-settings"',html)
+        status,_,script=call_raw("/static/admin.js")
+        self.assertEqual(status,200)
+        self.assertIn(b'openPortalPage("settings")',script)
+        self.assertNotIn(b'data-page="settings"',script)
     def test_printable_pdf_dossier(self):
         status,headers,data=call_raw("/api/v1/pdf/ADDRESS/adr-001")
         self.assertEqual(status,200)
