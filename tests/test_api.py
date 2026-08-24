@@ -100,6 +100,7 @@ class ApiTest(unittest.TestCase):
         self.assertEqual(status,200)
         self.assertIn(b'openPortalPage("settings")',script)
         self.assertNotIn(b'data-page="settings"',script)
+        self.assertNotIn(b'data-page="support"',script)
     def test_printable_pdf_dossier(self):
         status,headers,data=call_raw("/api/v1/pdf/ADDRESS/adr-001")
         self.assertEqual(status,200)
