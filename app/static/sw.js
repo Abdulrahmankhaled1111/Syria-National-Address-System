@@ -1,6 +1,6 @@
 "use strict";
 
-const VERSION = "sna-public-v26";
+const VERSION = "sna-public-v27";
 const SHELL = [
   "/", "/admin", "/manifest.webmanifest",
   "/static/style.css", "/static/map-views.css", "/static/coherence.css",
