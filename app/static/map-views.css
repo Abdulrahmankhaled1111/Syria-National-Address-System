@@ -92,3 +92,29 @@
 @media(max-width:1100px){.cad-title small{display:none}.cad-title{min-width:auto}.cad-search>button span{display:none}.cad-search label{width:min(260px,28vw)}}
 @media(max-width:1400px){.cad-title{display:none}.cad-search{flex:1}.cad-search label{flex:1;width:auto;min-width:150px}.cad-search>button{padding-inline:10px!important}}
 @media(max-width:760px){#field-map{height:62vh!important;min-height:430px}.cadastral-toolbar{height:48px!important}.cadastral-toolbar button{height:47px!important;min-height:47px!important;padding:0 9px!important}.cad-title>span:nth-child(2),.cad-title small{display:none}.cad-title{min-width:32px}.cad-search>button{display:none!important}.cad-search label{width:42vw;margin-inline-start:2px}.cadastral-toolbar.visible~.field-map-tools,.field-map-tools{top:58px!important}.maplibregl-ctrl-top-right{top:54px!important}}
+
+/* 2026 floating command bar */
+.field-map-pane{overflow:hidden!important;border:0!important;border-radius:16px!important;background:#dfe7e3!important;box-shadow:0 18px 48px #11271e24!important}
+#field-map{border-radius:16px!important}
+.cadastral-toolbar{inset:12px 12px auto!important;width:auto!important;height:58px!important;padding:7px!important;gap:8px!important;border:1px solid #ffffffb8!important;border-radius:14px!important;background:#fffffff2!important;box-shadow:0 12px 32px #122c2130,0 1px 0 #fff inset!important;backdrop-filter:blur(16px) saturate(1.2)}
+.cadastral-toolbar button{height:44px!important;min-height:44px!important;padding:0 12px!important;border:0!important;border-radius:9px!important;background:transparent!important;color:#31483f!important;font-size:11px!important;font-weight:780!important;transition:background .16s ease,color .16s ease,transform .16s ease!important}
+.cadastral-toolbar button:hover,.cadastral-toolbar button[aria-expanded="true"]{background:#e8f2ed!important;color:#155d43!important;transform:translateY(-1px)}
+.cad-tools{height:44px;gap:4px;padding-inline-end:8px;border-inline-end:1px solid #dce5e0}.cad-tools button{gap:7px}.cad-tools svg,.cad-search>button svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.cad-title{min-width:255px;gap:10px}.cad-title>span:nth-child(2){font-size:11px}.cad-title small{padding:4px 7px;background:#e5f1eb;color:#23684d;font-size:8px}
+.cad-portal-mark{width:36px;height:36px;border-radius:11px;background:linear-gradient(145deg,#26785a,#0d4c38);box-shadow:0 7px 16px #0c4a3735}
+.cad-search{height:44px;gap:5px}.cad-search>button{gap:7px;background:#f2f6f4!important}.cad-search>button:hover{background:#e5f0eb!important}
+.cad-search>button span{display:inline!important;width:auto!important;height:auto!important;margin:0!important;border:0!important;background:transparent!important}
+.cad-search label{height:44px;margin:0;width:min(390px,28vw);border:1px solid transparent;border-radius:10px;background:#f1f5f3;box-shadow:none;transition:background .16s,border-color .16s,box-shadow .16s}
+.cad-search label:hover{background:#edf3f0}.cad-search label:focus-within{border-color:#6da28b;background:#fff;box-shadow:0 0 0 3px #28735718}
+.cad-search label>svg{width:18px;height:18px;margin-inline-start:12px;stroke:#527066}
+.cad-search label input{height:42px!important;padding-inline:9px!important;font-size:11px!important}
+.cad-search label button{width:36px!important;height:34px!important;min-height:34px!important;margin-inline-end:5px!important;border:0!important;border-radius:8px!important;background:#246c50!important;color:#fff!important}
+.cad-search label button svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.cadastral-toolbar.visible~.field-map-tools,.field-map-tools{top:84px!important}.maplibregl-ctrl-top-right{top:80px!important;right:12px!important}
+.field-map-tools #field-locate,.field-map-tools #field-3d{border:1px solid #ffffffc7!important;border-radius:10px!important;background:#fffffff0!important;box-shadow:0 8px 20px #10271d26!important;backdrop-filter:blur(10px)}
+.cad-panel{top:80px!important;border:1px solid #ffffffc7!important;border-radius:13px!important;background:#fffffff8!important;box-shadow:0 20px 50px #10271d32!important;backdrop-filter:blur(16px)}
+#cad-themes-panel{inset-inline-start:12px!important}#cad-tools-panel{inset-inline-start:150px!important}
+.screen-scope-dim{fill:#48534e!important;fill-opacity:.5!important}
+.map-quality-badge{border:1px solid #ffffff24!important;border-radius:9px!important;background:#153c2fe8!important;box-shadow:0 8px 22px #10271d2c!important;backdrop-filter:blur(8px)}
+@media(max-width:1400px){.cad-title{display:none}.cadastral-toolbar{gap:5px}.cad-tools{padding-inline-end:5px}.cad-search label{width:auto;min-width:180px}}
+@media(max-width:760px){.cadastral-toolbar{inset:8px 8px auto!important;height:52px!important;padding:4px!important;border-radius:12px!important}.cadastral-toolbar button{height:42px!important;min-height:42px!important;padding:0 8px!important}.cad-tools{height:42px}.cad-tools button span{display:none}.cad-search label{height:42px;min-width:120px}.cad-search label input{height:40px!important}.cadastral-toolbar.visible~.field-map-tools,.field-map-tools{top:68px!important}.maplibregl-ctrl-top-right{top:65px!important}}
