@@ -128,6 +128,27 @@ class ApiTest(unittest.TestCase):
         self.assertNotIn(b'data-page="settings"',script)
         self.assertNotIn(b'data-page="support"',script)
         self.assertIn(b'<svg viewBox="0 0 24 24">',script)
+
+    def test_cross_authority_handover_is_scoped_and_auditable(self):
+        damascus=self.login("editor","Editor123!")
+        status,created=call("/api/v1/collaboration/cases","POST",{
+            "title":"Grenzprüfung zwischen Bauämtern","case_type":"BOUNDARY_REVIEW",
+            "priority":"HIGH","target_admin_unit_id":"au-zab","assigned_role":"REVIEWER",
+            "due_at":"2026-09-01","description":"Flurstücksgrenze fachlich abstimmen."},damascus)
+        self.assertEqual(status,201)
+        self.assertEqual(created["status"],"OPEN")
+        zabadani_reviewer=self.login("zabadani.reviewer","ZabReview123!")
+        status,inbox=call("/api/v1/collaboration/cases",token=zabadani_reviewer)
+        self.assertEqual(status,200)
+        self.assertTrue(any(item["id"]==created["id"] for item in inbox["cases"]))
+        status,accepted=call(f"/api/v1/collaboration/cases/{created['id']}/accept","POST",{},zabadani_reviewer)
+        self.assertEqual(status,200);self.assertEqual(accepted["status"],"ACCEPTED")
+        status,completed=call(f"/api/v1/collaboration/cases/{created['id']}/complete","POST",{
+            "resolution":"Grenzverlauf geprüft und an das absendende Bauamt zurückgemeldet."},zabadani_reviewer)
+        self.assertEqual(status,200);self.assertEqual(completed["status"],"COMPLETED")
+        other=self.login("reviewer","Review123!")
+        self.assertEqual(call(f"/api/v1/collaboration/cases/{created['id']}/return","POST",{
+            "resolution":"Not allowed"},other)[0],403)
     def test_printable_pdf_dossier(self):
         status,headers,data=call_raw("/api/v1/pdf/ADDRESS/adr-001")
         self.assertEqual(status,200)

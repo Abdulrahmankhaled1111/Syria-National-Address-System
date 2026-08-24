@@ -24,6 +24,14 @@ Datenbank-, Netzwerk-, Datei- oder Aktionszugriff. Es kann daher keine Vorgänge
 erstellen, verändern, genehmigen, löschen oder exportieren. Architektur und
 Pflegeprozess: [`docs/STAFF_ASSISTANT.md`](docs/STAFF_ASSISTANT.md).
 
+## Zusammenarbeit der Bauämter
+
+Die Bestandsdaten-Seite enthält eine rollen- und gebietsgebundene
+Arbeitszentrale für gemeinsame Behördenvorgänge. Bauämter können prüfbare
+Übergaben mit Zielbehörde, Zielrolle, Priorität, Frist und Ergebnis führen,
+ohne gegenseitig uneingeschränkten Registerzugriff zu erhalten. Details und
+Statusmodell: [`docs/INTER_AUTHORITY_COLLABORATION.md`](docs/INTER_AUTHORITY_COLLABORATION.md).
+
 ## Produktionsmodus
 
 Version 0.17 führt einen abgesicherten Produktionsmodus ein. Er verweigert den

@@ -227,6 +227,17 @@ CREATE TABLE IF NOT EXISTS cadastral_sections (
  official_status TEXT NOT NULL DEFAULT 'DRAFT', area_m2 REAL,
  UNIQUE(cadastral_district_id,section_number)
 );
+CREATE TABLE IF NOT EXISTS collaboration_cases (
+ id TEXT PRIMARY KEY, title TEXT NOT NULL, case_type TEXT NOT NULL,
+ priority TEXT NOT NULL DEFAULT 'NORMAL', status TEXT NOT NULL DEFAULT 'OPEN',
+ source_admin_unit_id TEXT NOT NULL REFERENCES admin_units(id),
+ target_admin_unit_id TEXT NOT NULL REFERENCES admin_units(id),
+ assigned_role TEXT NOT NULL, due_at TEXT, related_object_type TEXT, related_object_id TEXT,
+ description TEXT NOT NULL DEFAULT '', created_by TEXT NOT NULL REFERENCES users(id),
+ assigned_to TEXT REFERENCES users(id), resolution TEXT,
+ created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS collaboration_scope_idx ON collaboration_cases(source_admin_unit_id,target_admin_unit_id,status);
 CREATE TABLE IF NOT EXISTS parcels (
  id TEXT PRIMARY KEY, cadastral_section_id TEXT NOT NULL REFERENCES cadastral_sections(id),
  parcel_number TEXT NOT NULL, geometry_geojson TEXT NOT NULL,
@@ -1363,6 +1374,39 @@ class Handler(BaseHTTPRequestHandler):
                     rows=conn.execute("""SELECT * FROM support_tickets WHERE created_by=?
                         ORDER BY created_at DESC LIMIT 50""",(actor["id"],)).fetchall()
             return self.send_json([dict(row) for row in rows])
+        if path == "/api/v1/collaboration/offices":
+            actor=self.require({"GOVERNORATE_ADMIN","MUNICIPAL_EDITOR","SURVEYOR","REVIEWER","APPROVER",
+                                "PRINT_OFFICER","INSTALLER","REGISTRY_OFFICER","AUDITOR","SYSTEM_ADMIN"})
+            if not actor:return
+            with db() as conn:
+                rows=conn.execute("""SELECT id,code,level,parent_id,name_ar,name_en FROM admin_units
+                    WHERE status IN ('ACTIVE','PILOT') ORDER BY code""").fetchall()
+            return self.send_json([dict(row) for row in rows])
+        if path == "/api/v1/collaboration/cases":
+            actor=self.require({"GOVERNORATE_ADMIN","MUNICIPAL_EDITOR","SURVEYOR","REVIEWER","APPROVER",
+                                "PRINT_OFFICER","INSTALLER","REGISTRY_OFFICER","AUDITOR","SYSTEM_ADMIN"})
+            if not actor:return
+            with db() as conn:
+                profile=conn.execute("SELECT admin_unit_id FROM staff_profiles WHERE user_id=?",(actor["id"],)).fetchone()
+                params=[];scope=""
+                if actor["role"]!="SYSTEM_ADMIN":
+                    unit_ids=scoped_admin_unit_ids(conn,profile["admin_unit_id"]) if profile and profile["admin_unit_id"] else set()
+                    if not unit_ids:return self.send_json({"cases":[],"summary":{"open":0,"due":0,"urgent":0,"completed":0}})
+                    marks=",".join("?" for _ in unit_ids);params=[*unit_ids,*unit_ids]
+                    scope=f"WHERE (c.source_admin_unit_id IN ({marks}) OR c.target_admin_unit_id IN ({marks}))"
+                rows=conn.execute(f"""SELECT c.*,s.name_ar source_name_ar,s.name_en source_name_en,
+                    t.name_ar target_name_ar,t.name_en target_name_en,u.display_name assigned_name
+                    FROM collaboration_cases c JOIN admin_units s ON s.id=c.source_admin_unit_id
+                    JOIN admin_units t ON t.id=c.target_admin_unit_id LEFT JOIN users u ON u.id=c.assigned_to
+                    {scope} ORDER BY CASE c.priority WHEN 'CRITICAL' THEN 0 WHEN 'HIGH' THEN 1 ELSE 2 END,
+                    coalesce(c.due_at,'9999'),c.updated_at DESC""",params).fetchall()
+            stamp=now()[:10]
+            result=[dict(row) for row in rows]
+            summary={"open":sum(row["status"] in {"OPEN","ACCEPTED","IN_PROGRESS","RETURNED"} for row in result),
+                "due":sum(bool(row["due_at"] and row["due_at"][:10]<=stamp and row["status"] not in {"COMPLETED","CANCELLED"}) for row in result),
+                "urgent":sum(row["priority"] in {"HIGH","CRITICAL"} and row["status"] not in {"COMPLETED","CANCELLED"} for row in result),
+                "completed":sum(row["status"]=="COMPLETED" for row in result)}
+            return self.send_json({"cases":result,"summary":summary})
         return self.send_json({"error":"not_found"},404)
 
     def do_POST(self):
@@ -1689,6 +1733,50 @@ class Handler(BaseHTTPRequestHandler):
                     (ticket_id,category,subject[:160],message[:4000],"OPEN",actor["id"],stamp,stamp))
                 audit(conn,actor["id"],"CREATE","support_ticket",ticket_id,None,{"category":category,"subject":subject})
             return self.send_json({"id":ticket_id,"status":"OPEN"},201)
+        if path == "/api/v1/collaboration/cases":
+            actor=self.require({"GOVERNORATE_ADMIN","MUNICIPAL_EDITOR","SURVEYOR","REVIEWER","APPROVER","SYSTEM_ADMIN"})
+            if not actor:return
+            title=str(data.get("title","")).strip()[:180];description=str(data.get("description","")).strip()[:1200]
+            case_type=str(data.get("case_type","COORDINATION")).upper();priority=str(data.get("priority","NORMAL")).upper()
+            assigned_role=str(data.get("assigned_role","MUNICIPAL_EDITOR")).upper();target=str(data.get("target_admin_unit_id","")).strip()
+            if not title or not target:return self.send_json({"error":"title_and_target_required"},422)
+            if case_type not in {"BUILDING_PERMIT","BOUNDARY_REVIEW","ADDRESS_ASSIGNMENT","DATA_CORRECTION","INTER_AUTHORITY_REVIEW","COORDINATION"}:return self.send_json({"error":"invalid_case_type"},422)
+            if priority not in {"LOW","NORMAL","HIGH","CRITICAL"}:return self.send_json({"error":"invalid_priority"},422)
+            if assigned_role not in {"GOVERNORATE_ADMIN","MUNICIPAL_EDITOR","SURVEYOR","REVIEWER","APPROVER","REGISTRY_OFFICER"}:return self.send_json({"error":"invalid_assigned_role"},422)
+            with db() as conn:
+                profile=conn.execute("SELECT admin_unit_id FROM staff_profiles WHERE user_id=?",(actor["id"],)).fetchone()
+                source=str(data.get("source_admin_unit_id","")).strip() if actor["role"]=="SYSTEM_ADMIN" else (profile["admin_unit_id"] if profile else "")
+                units=conn.execute("SELECT id FROM admin_units WHERE id IN (?,?) AND status IN ('ACTIVE','PILOT')",(source,target)).fetchall()
+                if not source or len({row["id"] for row in units})!=len({source,target}):return self.send_json({"error":"invalid_administrative_unit"},422)
+                cid="col-"+uuid.uuid4().hex[:20];stamp=now();due=str(data.get("due_at","")).strip()[:25] or None
+                conn.execute("""INSERT INTO collaboration_cases
+                    (id,title,case_type,priority,status,source_admin_unit_id,target_admin_unit_id,assigned_role,
+                     due_at,related_object_type,related_object_id,description,created_by,created_at,updated_at)
+                    VALUES(?,?,?,?, 'OPEN',?,?,?,?,?,?,?,?,?,?)""",
+                    (cid,title,case_type,priority,source,target,assigned_role,due,
+                     str(data.get("related_object_type","")).strip()[:40] or None,
+                     str(data.get("related_object_id","")).strip()[:160] or None,description,actor["id"],stamp,stamp))
+                audit(conn,actor["id"],"CREATE","collaboration_case",cid,None,{"source":source,"target":target,"case_type":case_type,"priority":priority})
+            return self.send_json({"id":cid,"status":"OPEN"},201)
+        m=re.fullmatch(r"/api/v1/collaboration/cases/([^/]+)/(accept|start|complete|return)",path)
+        if m:
+            actor=self.require({"GOVERNORATE_ADMIN","MUNICIPAL_EDITOR","SURVEYOR","REVIEWER","APPROVER","REGISTRY_OFFICER","SYSTEM_ADMIN"})
+            if not actor:return
+            action=m.group(2);transitions={"accept":({"OPEN","RETURNED"},"ACCEPTED"),"start":({"OPEN","ACCEPTED","RETURNED"},"IN_PROGRESS"),"complete":({"ACCEPTED","IN_PROGRESS"},"COMPLETED"),"return":({"OPEN","ACCEPTED","IN_PROGRESS"},"RETURNED")}
+            allowed,new_status=transitions[action]
+            with db() as conn:
+                row=conn.execute("SELECT * FROM collaboration_cases WHERE id=?",(m.group(1),)).fetchone()
+                if not row:return self.send_json({"error":"not_found"},404)
+                profile=conn.execute("SELECT admin_unit_id FROM staff_profiles WHERE user_id=?",(actor["id"],)).fetchone()
+                unit_ids=scoped_admin_unit_ids(conn,profile["admin_unit_id"]) if actor["role"]!="SYSTEM_ADMIN" and profile and profile["admin_unit_id"] else set()
+                if actor["role"]!="SYSTEM_ADMIN" and row["target_admin_unit_id"] not in unit_ids:return self.send_json({"error":"outside_assigned_area"},403)
+                if row["status"] not in allowed:return self.send_json({"error":"invalid_transition","current":row["status"]},409)
+                resolution=str(data.get("resolution","")).strip()[:1200] or None
+                if action in {"complete","return"} and not resolution:return self.send_json({"error":"resolution_required"},422)
+                conn.execute("UPDATE collaboration_cases SET status=?,assigned_to=?,resolution=coalesce(?,resolution),updated_at=? WHERE id=?",
+                    (new_status,actor["id"],resolution,now(),row["id"]))
+                audit(conn,actor["id"],action.upper(),"collaboration_case",row["id"],dict(row),{"status":new_status,"resolution":resolution})
+            return self.send_json({"id":m.group(1),"status":new_status})
         if path == "/api/v1/cadastre/zabadani/parcels/import":
             actor=self.require({"SYSTEM_ADMIN"})
             if not actor:return
