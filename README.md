@@ -4,6 +4,11 @@ Lauffähiges MVP für einen fachlich kontrollierten Adress- und Geodatenbestand.
 
 > Dies ist ein professioneller Pilot, kein rechtsverbindliches Kataster und keine behauptete landesweite Produktionsplattform.
 
+Der vollständige, auf dieses Repository zugeschnittene Zielzustand für
+Datenhoheit, Registertrennung, drei Rechenzentrumsstandorte, HSM/MFA,
+Fortführungsworkflow, SOC, Backups und stufenweisen nationalen Rollout steht in
+[`docs/NATIONAL_SYSTEM_BLUEPRINT.md`](docs/NATIONAL_SYSTEM_BLUEPRINT.md).
+
 ## Produktionsmodus
 
 Version 0.17 führt einen abgesicherten Produktionsmodus ein. Er verweigert den

@@ -128,8 +128,15 @@ class ApiTest(unittest.TestCase):
             [36.2910,33.5130],[36.2900,33.5120]]]}
         status,parcel=call("/api/v1/cadastre/zabadani/parcels/capture","POST",{
             "admin_unit_id":"au-di","section_number":section["section_number"],"parcel_number":"1",
-            "quality_level":"D","geometry":parcel_geometry},admin)
+            "quality_level":"D","geometry":parcel_geometry,"owner_name":"Protected Test Owner",
+            "owner_reference":"DAM-REG-1001","owner_share_percent":100,
+            "owner_source_document":"Municipal file 1001"},admin)
         self.assertEqual(status,201)
+        self.assertGreater(parcel["area_m2"],1000)
+        self.assertEqual(call(f"/api/v1/cadastre/parcels/{parcel['id']}/record")[0],401)
+        status,record=call(f"/api/v1/cadastre/parcels/{parcel['id']}/record",token=admin)
+        self.assertEqual(status,200);self.assertEqual(record["classification"],"PROTECTED_INTERNAL")
+        self.assertEqual(record["ownership"]["owner_name"],"Protected Test Owner")
         outside_geometry={"type":"Polygon","coordinates":[[[36.3000,33.5200],[36.3010,33.5200],
             [36.3010,33.5210],[36.3000,33.5200]]]}
         self.assertEqual(call("/api/v1/cadastre/zabadani/parcels/capture","POST",{
@@ -141,10 +148,15 @@ class ApiTest(unittest.TestCase):
             "quality_level":"D","geometry":building_geometry}
         status,building=call("/api/v1/cadastre/buildings/capture","POST",body,admin)
         self.assertEqual(status,201);self.assertEqual(building["object_number"],"1")
+        self.assertGreater(building["footprint_area_m2"],100)
         self.assertEqual(call("/api/v1/cadastre/buildings/capture","POST",body,admin)[0],409)
         status,features=call("/api/v1/map/cadastre/buildings?admin_unit_id=au-di",token=admin)
         self.assertEqual(status,200)
         self.assertTrue(any(item["id"]==building["id"] for item in features["features"]))
+        status,parcel_features=call("/api/v1/map/zabadani/parcels?admin_unit_id=au-di",token=admin)
+        mapped_parcel=next(item for item in parcel_features["features"] if item["id"]==parcel["id"])
+        self.assertGreater(mapped_parcel["properties"]["area_m2"],1000)
+        self.assertNotIn("owner_name",mapped_parcel["properties"])
         query=urllib.parse.urlencode({"building_ref":building["id"],
             "street_name_ar":"Damascus Street","street_side":"LEFT"})
         status,suggestion=call("/api/v1/numbering/next-house-number?"+query,token=admin)

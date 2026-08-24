@@ -185,7 +185,8 @@ CREATE TABLE IF NOT EXISTS building_catalog (
  longitude REAL NOT NULL, latitude REAL NOT NULL, source TEXT NOT NULL,
  quality_level TEXT NOT NULL, official_status TEXT NOT NULL,
  admin_unit_id TEXT REFERENCES admin_units(id), parcel_id TEXT REFERENCES parcels(id),
- object_number TEXT, created_by TEXT REFERENCES users(id), created_at TEXT
+ object_number TEXT, created_by TEXT REFERENCES users(id), created_at TEXT,
+ footprint_area_m2 REAL
 );
 CREATE TABLE IF NOT EXISTS object_dossiers (
  dossier_number TEXT PRIMARY KEY, object_type TEXT NOT NULL, object_ref TEXT NOT NULL,
@@ -222,14 +223,20 @@ CREATE TABLE IF NOT EXISTS cadastral_districts (
 CREATE TABLE IF NOT EXISTS cadastral_sections (
  id TEXT PRIMARY KEY, cadastral_district_id TEXT NOT NULL REFERENCES cadastral_districts(id),
  section_number TEXT NOT NULL, name_ar TEXT, geometry_geojson TEXT,
- official_status TEXT NOT NULL DEFAULT 'DRAFT',
+ official_status TEXT NOT NULL DEFAULT 'DRAFT', area_m2 REAL,
  UNIQUE(cadastral_district_id,section_number)
 );
 CREATE TABLE IF NOT EXISTS parcels (
  id TEXT PRIMARY KEY, cadastral_section_id TEXT NOT NULL REFERENCES cadastral_sections(id),
  parcel_number TEXT NOT NULL, geometry_geojson TEXT NOT NULL,
- quality_level TEXT NOT NULL, official_status TEXT NOT NULL DEFAULT 'DRAFT',
+ quality_level TEXT NOT NULL, official_status TEXT NOT NULL DEFAULT 'DRAFT', area_m2 REAL,
  UNIQUE(cadastral_section_id,parcel_number)
+);
+CREATE TABLE IF NOT EXISTS parcel_ownership_records (
+ id TEXT PRIMARY KEY, parcel_id TEXT NOT NULL REFERENCES parcels(id),
+ owner_name TEXT NOT NULL, owner_reference TEXT, share_percent REAL NOT NULL DEFAULT 100,
+ source_document TEXT, status TEXT NOT NULL DEFAULT 'DRAFT',
+ valid_from TEXT NOT NULL, valid_to TEXT, created_by TEXT NOT NULL REFERENCES users(id)
 );
 CREATE TABLE IF NOT EXISTS parcel_building_links (
  parcel_id TEXT NOT NULL REFERENCES parcels(id), building_ref TEXT NOT NULL,
@@ -241,6 +248,62 @@ CREATE TABLE IF NOT EXISTS parcel_building_links (
 
 def now() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+def geometry_area_m2(geometry) -> float:
+    """Approximate WGS84 polygon area for field feedback and SQLite pilots.
+
+    The production PostGIS schema remains authoritative and uses geography-based
+    ST_Area. This local calculation is deterministic and sufficiently accurate
+    for capture feedback, but is not a substitute for an official survey.
+    """
+    if not isinstance(geometry,dict):
+        return 0.0
+    coordinates=geometry.get("coordinates")
+    if geometry.get("type")=="Polygon":
+        polygons=[coordinates]
+    elif geometry.get("type")=="MultiPolygon":
+        polygons=coordinates
+    else:
+        return 0.0
+    radius=6_371_008.8
+    total=0.0
+    for polygon in polygons or []:
+        if not polygon or not polygon[0]:continue
+        for index,ring in enumerate(polygon):
+            if len(ring)<4:continue
+            mean_lat=sum(float(point[1]) for point in ring)/len(ring)
+            cos_lat=math.cos(math.radians(mean_lat))
+            projected=[(radius*math.radians(float(point[0]))*cos_lat,
+                        radius*math.radians(float(point[1]))) for point in ring]
+            area=abs(sum(projected[i][0]*projected[(i+1)%len(projected)][1]-
+                         projected[(i+1)%len(projected)][0]*projected[i][1]
+                         for i in range(len(projected)))/2)
+            total += area if index==0 else -area
+    return round(max(0.0,total),2)
+
+def ownership_payload(data):
+    owner_name=str(data.get("owner_name","")).strip()[:240]
+    if not owner_name:
+        return None
+    try: share_percent=float(data.get("owner_share_percent",100))
+    except (TypeError,ValueError): raise ValueError("invalid_owner_share")
+    if not 0 < share_percent <= 100:raise ValueError("invalid_owner_share")
+    return {"owner_name":owner_name,
+        "owner_reference":str(data.get("owner_reference","")).strip()[:160] or None,
+        "share_percent":round(share_percent,4),
+        "source_document":str(data.get("owner_source_document","")).strip()[:240] or None}
+
+def replace_parcel_ownership(conn,parcel_id,ownership,actor_id,stamp):
+    if not ownership:return None
+    conn.execute("UPDATE parcel_ownership_records SET valid_to=? WHERE parcel_id=? AND valid_to IS NULL",
+                 (stamp,parcel_id))
+    record_id="own-"+uuid.uuid4().hex[:20]
+    conn.execute("""INSERT INTO parcel_ownership_records
+        (id,parcel_id,owner_name,owner_reference,share_percent,source_document,status,valid_from,valid_to,created_by)
+        VALUES(?,?,?,?,?,?,'DRAFT',?,NULL,?)""",
+        (record_id,parcel_id,ownership["owner_name"],ownership["owner_reference"],
+         ownership["share_percent"],ownership["source_document"],stamp,actor_id))
+    return record_id
 
 def seed_governorates(conn):
     conn.executemany("""INSERT OR IGNORE INTO admin_units
@@ -446,9 +509,26 @@ def init_db(reset=False):
             ("object_number","TEXT"),
             ("created_by","TEXT REFERENCES users(id)"),
             ("created_at","TEXT"),
+            ("footprint_area_m2","REAL"),
         ):
             if column not in catalog_columns:
                 conn.execute(f"ALTER TABLE building_catalog ADD COLUMN {column} {definition}")
+        section_columns={row["name"] for row in conn.execute("PRAGMA table_info(cadastral_sections)")}
+        if "area_m2" not in section_columns:
+            conn.execute("ALTER TABLE cadastral_sections ADD COLUMN area_m2 REAL")
+        parcel_columns={row["name"] for row in conn.execute("PRAGMA table_info(parcels)")}
+        if "area_m2" not in parcel_columns:
+            conn.execute("ALTER TABLE parcels ADD COLUMN area_m2 REAL")
+        conn.execute("""CREATE INDEX IF NOT EXISTS ix_parcel_ownership_active
+            ON parcel_ownership_records(parcel_id,valid_to)""")
+        for table,column in (("cadastral_sections","geometry_geojson"),("parcels","geometry_geojson"),
+                             ("building_catalog","geometry_geojson")):
+            area_column="footprint_area_m2" if table=="building_catalog" else "area_m2"
+            rows=conn.execute(f"SELECT id,{column} FROM {table} WHERE {column} IS NOT NULL AND {area_column} IS NULL").fetchall()
+            for row in rows:
+                try: area=geometry_area_m2(json.loads(row[column]))
+                except (TypeError,ValueError,json.JSONDecodeError): area=0
+                conn.execute(f"UPDATE {table} SET {area_column}=? WHERE id=?",(area,row["id"]))
         conn.execute("""CREATE UNIQUE INDEX IF NOT EXISTS ux_building_object_number
             ON building_catalog(admin_unit_id,object_number)
             WHERE admin_unit_id IS NOT NULL AND object_number IS NOT NULL""")
@@ -821,7 +901,8 @@ class Handler(BaseHTTPRequestHandler):
                     "centroid":[row["longitude"],row["latitude"]],"admin_unit_id":row["admin_unit_id"],
                     "parcel_id":row["parcel_id"],"parcel_number":row["parcel_number"],
                     "section_number":row["section_number"],"quality_level":row["quality_level"],
-                    "official_status":row["official_status"],"source":row["source"]}}
+                    "official_status":row["official_status"],"source":row["source"],
+                    "footprint_area_m2":row["footprint_area_m2"]}}
                 for row in rows]})
         if path == "/api/v1/map/zabadani/number-proposals":
             actor=self.require({"GOVERNORATE_ADMIN","MUNICIPAL_EDITOR","SYSTEM_ADMIN"})
@@ -870,7 +951,8 @@ class Handler(BaseHTTPRequestHandler):
                         "admin_unit_id":row["admin_unit_id"],
                         "district_name_ar":row["district_name_ar"],
                         "quality_level":row["quality_level"],
-                        "official_status":row["official_status"]}} for row in rows]})
+                        "official_status":row["official_status"],
+                        "area_m2":row["area_m2"]}} for row in rows]})
         if path == "/api/v1/map/cadastre/sections":
             actor=self.require({"GOVERNORATE_ADMIN","MUNICIPAL_EDITOR","SYSTEM_ADMIN"})
             if not actor:return
@@ -887,7 +969,7 @@ class Handler(BaseHTTPRequestHandler):
                 "type":"Feature","id":row["id"],"geometry":json.loads(row["geometry_geojson"]),
                 "properties":{"section_number":row["section_number"],"name_ar":row["name_ar"],
                     "admin_unit_id":row["admin_unit_id"],"district_code":row["district_code"],
-                    "official_status":row["official_status"]}} for row in rows]})
+                    "official_status":row["official_status"],"area_m2":row["area_m2"]}} for row in rows]})
         if path == "/api/v1/cadastre/zabadani/sections":
             actor=self.require({"GOVERNORATE_ADMIN","MUNICIPAL_EDITOR","SYSTEM_ADMIN"})
             if not actor:return
@@ -896,7 +978,7 @@ class Handler(BaseHTTPRequestHandler):
             if not scope:return
             with db() as conn:
                 units=scoped_admin_unit_ids(conn,scope);marks=",".join("?" for _ in units)
-                rows=conn.execute(f"""SELECT s.id,s.section_number,s.name_ar,s.geometry_geojson,s.official_status,
+                rows=conn.execute(f"""SELECT s.id,s.section_number,s.name_ar,s.geometry_geojson,s.official_status,s.area_m2,
                     count(p.id) parcel_count FROM cadastral_sections s
                     JOIN cadastral_districts d ON d.id=s.cadastral_district_id
                     LEFT JOIN parcels p ON p.cadastral_section_id=s.id
@@ -1045,6 +1127,36 @@ class Handler(BaseHTTPRequestHandler):
                       None,{"records":len(rows),"purpose":"municipal_population_register"})
             return self.send_json({"unit_id":m.group(1),"classification":"STRICTLY_PROTECTED",
                                    "residents":[dict(x) for x in rows]})
+        m=re.fullmatch(r"/api/v1/cadastre/parcels/([^/]+)/record",path)
+        if m:
+            actor=self.require({"GOVERNORATE_ADMIN","MUNICIPAL_EDITOR","SYSTEM_ADMIN"})
+            if not actor:return
+            with db() as conn:
+                parcel=conn.execute("""SELECT p.*,s.section_number,s.name_ar section_name_ar,
+                    d.admin_unit_id,d.district_code FROM parcels p
+                    JOIN cadastral_sections s ON s.id=p.cadastral_section_id
+                    JOIN cadastral_districts d ON d.id=s.cadastral_district_id WHERE p.id=?""",
+                    (m.group(1),)).fetchone()
+                if not parcel:return self.send_json({"error":"not_found"},404)
+                if actor["role"]!="SYSTEM_ADMIN":
+                    governorate=assigned_governorate(conn,actor["id"])
+                    profile=conn.execute("SELECT admin_unit_id FROM staff_profiles WHERE user_id=?",(actor["id"],)).fetchone()
+                    scope=governorate if actor["role"]=="GOVERNORATE_ADMIN" else (profile["admin_unit_id"] if profile else None)
+                    if not scope or parcel["admin_unit_id"] not in scoped_admin_unit_ids(conn,scope):
+                        return self.send_json({"error":"outside_assigned_governorate"},403)
+                ownership=conn.execute("""SELECT id,owner_name,owner_reference,share_percent,
+                    source_document,status,valid_from FROM parcel_ownership_records
+                    WHERE parcel_id=? AND valid_to IS NULL ORDER BY valid_from DESC LIMIT 1""",
+                    (parcel["id"],)).fetchone()
+                buildings=conn.execute("""SELECT id,technical_code,object_number,footprint_area_m2,
+                    official_status FROM building_catalog WHERE parcel_id=?
+                    ORDER BY CAST(object_number AS INTEGER),object_number""",(parcel["id"],)).fetchall()
+                audit(conn,actor["id"],"READ_PROTECTED_REGISTER","PARCEL",parcel["id"],None,
+                      {"record_type":"ownership","ownership_record_present":bool(ownership)})
+            result=dict(parcel);result.pop("geometry_geojson",None)
+            return self.send_json({"classification":"PROTECTED_INTERNAL","parcel":result,
+                "ownership":dict(ownership) if ownership else None,
+                "buildings":[dict(row) for row in buildings]})
         if path in ("/api/v1/exports/google-addresses.kml","/api/v1/exports/google-addresses.csv",
                     "/api/v1/exports/google-addresses/validation"):
             actor=self.require({"SYSTEM_ADMIN"})
@@ -1330,6 +1442,7 @@ class Handler(BaseHTTPRequestHandler):
                     all(isinstance(value,(int,float)) for value in point[:2]) for point in ring):
                     return self.send_json({"error":"valid_closed_section_polygon_required"},422)
                 geometry_json=json.dumps(geometry,separators=(",",":"))
+            area_m2=geometry_area_m2(geometry) if geometry else None
             with db() as conn:
                 unit=conn.execute("SELECT code,name_ar,name_en FROM admin_units WHERE id=?",(scope,)).fetchone()
             if not unit:return self.send_json({"error":"administrative_scope_not_found"},404)
@@ -1351,8 +1464,8 @@ class Handler(BaseHTTPRequestHandler):
                         (district_id,scope,district_code,unit["name_ar"],unit["name_en"]))
                     district_id=conn.execute("SELECT id FROM cadastral_districts WHERE district_code=?",(district_code,)).fetchone()["id"]
                     conn.execute("""INSERT INTO cadastral_sections
-                        (id,cadastral_district_id,section_number,name_ar,geometry_geojson,official_status)
-                        VALUES(?,?,?,?,?,'DRAFT')""",(section_id,district_id,section_number,name_ar,geometry_json))
+                        (id,cadastral_district_id,section_number,name_ar,geometry_geojson,official_status,area_m2)
+                        VALUES(?,?,?,?,?,'DRAFT',?)""",(section_id,district_id,section_number,name_ar,geometry_json,area_m2))
                     request_id=str(uuid.uuid4())
                     payload={"section_id":section_id,"section_number":section_number,
                         "name_ar":name_ar,"has_geometry":geometry_json is not None}
@@ -1364,7 +1477,7 @@ class Handler(BaseHTTPRequestHandler):
                         {**payload,"official_status":"DRAFT"})
             except sqlite3.IntegrityError:
                 return self.send_json({"error":"section_number_exists"},409)
-            return self.send_json({"id":section_id,"section_number":section_number,
+            return self.send_json({"id":section_id,"section_number":section_number,"area_m2":area_m2,
                 "name_ar":name_ar,"official_status":"DRAFT","change_request_id":request_id,
                 "next_step":"CAPTURE_PARCELS"},201)
         m=re.fullmatch(r"/api/v1/cadastre/zabadani/sections/([^/]+)/(update|delete)",path)
@@ -1395,6 +1508,7 @@ class Handler(BaseHTTPRequestHandler):
                         conn.execute("UPDATE house_number_cases SET parcel_id=NULL WHERE parcel_id=?",(parcel_id,))
                         conn.execute("UPDATE building_catalog SET parcel_id=NULL WHERE parcel_id=?",(parcel_id,))
                         conn.execute("DELETE FROM parcel_building_links WHERE parcel_id=?",(parcel_id,))
+                        conn.execute("DELETE FROM parcel_ownership_records WHERE parcel_id=?",(parcel_id,))
                         conn.execute("DELETE FROM change_requests WHERE object_type='PARCEL' AND object_id=?",(parcel_id,))
                     conn.execute("DELETE FROM parcels WHERE cadastral_section_id=?",(row["id"],))
                     conn.execute("DELETE FROM change_requests WHERE object_type='CADASTRAL_SECTION' AND object_id=?",(row["id"],))
@@ -1407,6 +1521,7 @@ class Handler(BaseHTTPRequestHandler):
                 if not section_number or not re.fullmatch(r"[0-9A-Za-z\u0600-\u06ff._/-]+",section_number):
                     return self.send_json({"error":"invalid_section_number"},422)
                 geometry_json=row["geometry_geojson"]
+                area_m2=row["area_m2"]
                 geometry=data.get("geometry") if isinstance(data.get("geometry"),dict) else None
                 if geometry is not None:
                     ring=geometry.get("coordinates",[[]])[0] if geometry.get("type")=="Polygon" else []
@@ -1420,14 +1535,15 @@ class Handler(BaseHTTPRequestHandler):
                     if outside:return self.send_json({"error":"section_boundary_would_exclude_parcels",
                         "parcel_ids":outside},422)
                     geometry_json=json.dumps(geometry,separators=(",",":"))
+                    area_m2=geometry_area_m2(geometry)
                 try:
-                    conn.execute("UPDATE cadastral_sections SET section_number=?,name_ar=?,geometry_geojson=?,official_status='DRAFT' WHERE id=?",
-                        (section_number,name_ar,geometry_json,row["id"]))
+                    conn.execute("UPDATE cadastral_sections SET section_number=?,name_ar=?,geometry_geojson=?,official_status='DRAFT',area_m2=? WHERE id=?",
+                        (section_number,name_ar,geometry_json,area_m2,row["id"]))
                 except sqlite3.IntegrityError:
                     return self.send_json({"error":"section_number_exists"},409)
                 audit(conn,actor["id"],"UPDATE","cadastral_section",row["id"],dict(row),
                     {"section_number":section_number,"name_ar":name_ar,"geometry_changed":geometry is not None})
-            return self.send_json({"id":m.group(1),"section_number":section_number,"name_ar":name_ar,
+            return self.send_json({"id":m.group(1),"section_number":section_number,"name_ar":name_ar,"area_m2":area_m2,
                 "official_status":"DRAFT"})
         m=re.fullmatch(r"/api/v1/cadastre/zabadani/parcels/([^/]+)/(update|delete)",path)
         if m:
@@ -1450,6 +1566,7 @@ class Handler(BaseHTTPRequestHandler):
                 if m.group(2)=="delete":
                     conn.execute("UPDATE house_number_cases SET parcel_id=NULL WHERE parcel_id=?",(row["id"],))
                     conn.execute("DELETE FROM parcel_building_links WHERE parcel_id=?",(row["id"],))
+                    conn.execute("DELETE FROM parcel_ownership_records WHERE parcel_id=?",(row["id"],))
                     conn.execute("DELETE FROM change_requests WHERE object_type='PARCEL' AND object_id=?",(row["id"],))
                     conn.execute("DELETE FROM parcels WHERE id=?",(row["id"],))
                     audit(conn,actor["id"],"DELETE_DRAFT","parcel",row["id"],dict(row),None)
@@ -1460,20 +1577,27 @@ class Handler(BaseHTTPRequestHandler):
                 if not parcel_number or quality not in {"A","B","C","D","E"}:
                     return self.send_json({"error":"invalid_parcel_properties"},422)
                 geometry_json=row["geometry_geojson"]
+                area_m2=row["area_m2"]
                 if geometry is not None:
                     ring=geometry.get("coordinates",[[]])[0] if isinstance(geometry,dict) else []
                     if geometry.get("type")!="Polygon" or len(ring)<4 or ring[0]!=ring[-1]:
                         return self.send_json({"error":"valid_polygon_required"},422)
                     geometry_json=json.dumps(geometry,separators=(",",":"))
+                    area_m2=geometry_area_m2(geometry)
+                try: ownership=ownership_payload(data)
+                except ValueError as error:return self.send_json({"error":str(error)},422)
                 try:
                     conn.execute("""UPDATE parcels SET parcel_number=?,quality_level=?,geometry_geojson=?,
-                        official_status='DRAFT' WHERE id=?""",(parcel_number,quality,geometry_json,row["id"]))
+                        official_status='DRAFT',area_m2=? WHERE id=?""",(parcel_number,quality,geometry_json,area_m2,row["id"]))
                 except sqlite3.IntegrityError:
                     return self.send_json({"error":"parcel_number_exists_in_section"},409)
+                ownership_record_id=replace_parcel_ownership(conn,row["id"],ownership,actor["id"],now())
                 audit(conn,actor["id"],"UPDATE_DRAFT","parcel",row["id"],dict(row),
-                    {"parcel_number":parcel_number,"quality_level":quality})
+                    {"parcel_number":parcel_number,"quality_level":quality,"area_m2":area_m2,
+                     "ownership_record_updated":bool(ownership_record_id)})
             return self.send_json({"id":m.group(1),"parcel_number":parcel_number,
-                "quality_level":quality,"official_status":"DRAFT"})
+                "quality_level":quality,"official_status":"DRAFT","area_m2":area_m2,
+                "ownership_record_id":ownership_record_id})
         if path == "/api/v1/cadastre/buildings/capture":
             actor=self.require({"GOVERNORATE_ADMIN","MUNICIPAL_EDITOR","SYSTEM_ADMIN"})
             if not actor:return
@@ -1512,16 +1636,17 @@ class Handler(BaseHTTPRequestHandler):
                 center_points=ring[:-1] or ring
                 longitude=sum(point[0] for point in center_points)/len(center_points)
                 latitude=sum(point[1] for point in center_points)/len(center_points)
+                footprint_area_m2=geometry_area_m2(geometry)
                 building_id="bld-"+uuid.uuid4().hex[:20]
                 technical_code=f"{unit['code']}-BLD-{int(object_number):06d}" if object_number.isdigit() else f"{unit['code']}-BLD-{object_number}"
                 stamp=now()
                 try:
                     conn.execute("""INSERT INTO building_catalog
                         (id,technical_code,geometry_geojson,longitude,latitude,source,quality_level,
-                         official_status,admin_unit_id,parcel_id,object_number,created_by,created_at)
-                        VALUES(?,?,?,?,?,?,?,'DRAFT',?,?,?,?,?)""",
+                         official_status,admin_unit_id,parcel_id,object_number,created_by,created_at,footprint_area_m2)
+                        VALUES(?,?,?,?,?,?,?,'DRAFT',?,?,?,?,?,?)""",
                         (building_id,technical_code,json.dumps(geometry,separators=(",",":")),longitude,latitude,
-                         "MUNICIPAL_MAP_CAPTURE",quality,scope,parcel_id,object_number,actor["id"],stamp))
+                         "MUNICIPAL_MAP_CAPTURE",quality,scope,parcel_id,object_number,actor["id"],stamp,footprint_area_m2))
                 except sqlite3.IntegrityError:
                     return self.send_json({"error":"object_number_exists_in_administrative_area"},409)
                 dossier=f"DOS-{technical_code}"
@@ -1538,6 +1663,7 @@ class Handler(BaseHTTPRequestHandler):
                 audit(conn,actor["id"],"CAPTURE_DRAFT","building",building_id,None,payload)
             return self.send_json({"id":building_id,"technical_code":technical_code,
                 "object_number":object_number,"parcel_id":parcel_id,"status":"DRAFT",
+                "footprint_area_m2":footprint_area_m2,
                 "change_request_id":request_id,"next_step":"ASSIGN_ENTRANCE_AND_HOUSE_NUMBER"},201)
         if path == "/api/v1/support-tickets":
             actor=self.require({"MUNICIPAL_EDITOR","SURVEYOR","REVIEWER","APPROVER","PRINT_OFFICER",
@@ -1598,18 +1724,23 @@ class Handler(BaseHTTPRequestHandler):
                     previous=conn.execute("""SELECT * FROM parcels WHERE cadastral_section_id=?
                         AND parcel_number=?""",(section_id,parcel_number)).fetchone()
                     geometry_json=json.dumps(geometry,ensure_ascii=False,separators=(",",":"))
+                    area_m2=geometry_area_m2(geometry)
                     if previous:
-                        conn.execute("""UPDATE parcels SET geometry_geojson=?,quality_level=?,official_status='DRAFT'
-                            WHERE id=?""",(geometry_json,quality,previous["id"]))
+                        conn.execute("""UPDATE parcels SET geometry_geojson=?,quality_level=?,official_status='DRAFT',area_m2=?
+                            WHERE id=?""",(geometry_json,quality,area_m2,previous["id"]))
                         audit(conn,actor["id"],"IMPORT_UPDATE","parcel",previous["id"],dict(previous),
-                              {"section_number":section_number,"parcel_number":parcel_number,"quality_level":quality,"official_status":"DRAFT"})
+                              {"section_number":section_number,"parcel_number":parcel_number,"quality_level":quality,
+                               "official_status":"DRAFT","area_m2":area_m2})
                         updated+=1
                     else:
                         parcel_id="par-"+uuid.uuid4().hex[:20]
-                        conn.execute("INSERT INTO parcels VALUES(?,?,?,?,?,'DRAFT')",
-                            (parcel_id,section_id,parcel_number,geometry_json,quality))
+                        conn.execute("""INSERT INTO parcels
+                            (id,cadastral_section_id,parcel_number,geometry_geojson,quality_level,official_status,area_m2)
+                            VALUES(?,?,?,?,?,'DRAFT',?)""",
+                            (parcel_id,section_id,parcel_number,geometry_json,quality,area_m2))
                         audit(conn,actor["id"],"IMPORT_CREATE","parcel",parcel_id,None,
-                              {"section_number":section_number,"parcel_number":parcel_number,"quality_level":quality,"official_status":"DRAFT"})
+                              {"section_number":section_number,"parcel_number":parcel_number,"quality_level":quality,
+                               "official_status":"DRAFT","area_m2":area_m2})
                         created+=1
             return self.send_json({"district_code":district_code,"created":created,"updated":updated,
                 "status":"DRAFT","next_step":"TOPOLOGY_AND_SURVEY_REVIEW"},201)
@@ -1634,6 +1765,9 @@ class Handler(BaseHTTPRequestHandler):
             for point in ring:
                 if not isinstance(point,list) or len(point)<2 or not all(isinstance(value,(int,float)) for value in point[:2]):
                     return self.send_json({"error":"invalid_coordinate"},422)
+            try: ownership=ownership_payload(data)
+            except ValueError as error:return self.send_json({"error":str(error)},422)
+            area_m2=geometry_area_m2(geometry)
             with db() as conn:
                 unit=conn.execute("SELECT code,name_ar,name_en FROM admin_units WHERE id=?",(scope,)).fetchone()
             if not unit:return self.send_json({"error":"administrative_scope_not_found"},404)
@@ -1667,8 +1801,8 @@ class Handler(BaseHTTPRequestHandler):
                     if existing["official_status"] not in {"DRAFT","REJECTED"}:
                         return self.send_json({"error":"approved_parcel_requires_formal_change"},409)
                     before=dict(existing);geometry_json=json.dumps(geometry,separators=(",",":"))
-                    conn.execute("""UPDATE parcels SET geometry_geojson=?,quality_level=?,official_status='DRAFT'
-                        WHERE id=?""",(geometry_json,quality_level,existing["id"]))
+                    conn.execute("""UPDATE parcels SET geometry_geojson=?,quality_level=?,official_status='DRAFT',area_m2=?
+                        WHERE id=?""",(geometry_json,quality_level,area_m2,existing["id"]))
                     request=conn.execute("""SELECT id FROM change_requests WHERE object_type='PARCEL'
                         AND object_id=? AND status IN ('SUBMITTED','REVIEWED') ORDER BY created_at DESC LIMIT 1""",
                         (existing["id"],)).fetchone()
@@ -1684,22 +1818,30 @@ class Handler(BaseHTTPRequestHandler):
                             (request_id,"PARCEL",existing["id"],"UPDATE",json.dumps(payload,ensure_ascii=False),
                              str(data.get("reason","Korrektur der Flurstücksgrenze"))[:500],"SUBMITTED",
                              actor["id"],None,None,stamp,stamp))
+                    ownership_record_id=replace_parcel_ownership(conn,existing["id"],ownership,actor["id"],stamp)
                     audit(conn,actor["id"],"UPDATE_DRAFT_GEOMETRY","parcel",existing["id"],before,
                           {"section_number":section_number,"parcel_number":parcel_number,
-                           "quality_level":quality_level,"official_status":"DRAFT"})
+                           "quality_level":quality_level,"official_status":"DRAFT","area_m2":area_m2,
+                           "ownership_record_updated":bool(ownership_record_id)})
                     return self.send_json({"id":existing["id"],"change_request_id":request_id,
-                        "status":"DRAFT","updated":True,"next_step":"REVIEW"},200)
-                conn.execute("INSERT INTO parcels VALUES(?,?,?,?,?,'DRAFT')",
-                    (parcel_id,section_id,parcel_number,json.dumps(geometry,separators=(",",":")),quality_level))
+                        "status":"DRAFT","updated":True,"area_m2":area_m2,
+                        "ownership_record_id":ownership_record_id,"next_step":"REVIEW"},200)
+                conn.execute("""INSERT INTO parcels
+                    (id,cadastral_section_id,parcel_number,geometry_geojson,quality_level,official_status,area_m2)
+                    VALUES(?,?,?,?,?,'DRAFT',?)""",
+                    (parcel_id,section_id,parcel_number,json.dumps(geometry,separators=(",",":")),quality_level,area_m2))
+                ownership_record_id=replace_parcel_ownership(conn,parcel_id,ownership,actor["id"],stamp)
                 request_id=str(uuid.uuid4())
                 payload={"parcel_id":parcel_id,"district_code":district_code,"section_number":section_number,
-                    "parcel_number":parcel_number,"quality_level":quality_level}
+                    "parcel_number":parcel_number,"quality_level":quality_level,"area_m2":area_m2,
+                    "ownership_record_present":bool(ownership_record_id)}
                 conn.execute("INSERT INTO change_requests VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
                     (request_id,"PARCEL",parcel_id,"CREATE",json.dumps(payload,ensure_ascii=False),
                      str(data.get("reason",f"Katastererfassung {unit['name_en']}"))[:500],"SUBMITTED",
                      actor["id"],None,None,stamp,stamp))
                 audit(conn,actor["id"],"CAPTURE_DRAFT","parcel",parcel_id,None,payload)
             return self.send_json({"id":parcel_id,"change_request_id":request_id,"status":"DRAFT",
+                "area_m2":area_m2,"ownership_record_id":ownership_record_id,
                 "next_step":"REVIEW"},201)
         if path == "/api/v1/change-requests":
             actor=self.require({"MUNICIPAL_EDITOR","SURVEYOR","SYSTEM_ADMIN"})

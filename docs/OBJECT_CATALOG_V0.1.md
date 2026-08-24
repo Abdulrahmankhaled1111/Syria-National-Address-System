@@ -54,6 +54,23 @@ Qualität:
 - Regel: Eigentum wird nicht in diesem öffentlichen Fachobjekt gespeichert.
 - Sichtbarkeit: intern; vereinfachte Darstellung nach politisch-rechtlicher Entscheidung.
 
+## 41000 Katasterbezirk und Flur (CadastralDistrict, CadastralSection)
+
+- Definition: räumliche Ordnungseinheiten für die eindeutige Flurstücksnummerierung.
+- Geometrie der Flur: MultiPolygon; Flurstücke müssen innerhalb ihrer Flur liegen.
+- Pflicht: Katasterbezirkskennung, Flurnummer, Geometrie und Status.
+- Regel: Flurnummern sind innerhalb eines Katasterbezirks eindeutig; Flurstücksnummern innerhalb einer Flur.
+- Fläche: automatisch aus der Geometrie; vor Freigabe nicht amtlich.
+- Sichtbarkeit: intern; freigegebene vereinfachte Geometrien optional öffentlich.
+
+## 42000 Geschützte Eigentumsakte (ParcelOwnershipRecord)
+
+- Definition: zeitlich versionierter Nachweis einer Eigentümer- oder Berechtigtenzuordnung.
+- Pflicht bei vorhandener Akte: Flurstück, Name, Anteil, Gültigkeitsbeginn, Quelle und Bearbeiter.
+- Optional: Registerzeichen und Nachweisdokument.
+- Regel: eine Korrektur überschreibt die alte Akte nicht, sondern beendet deren Gültigkeit.
+- Sichtbarkeit: besonders geschützt; niemals Bestandteil öffentlicher Karten- oder Adressdaten.
+
 ## 50000 Gebäude (`Building`)
 
 - Definition: dauerhaftes oder dokumentiertes Bauwerk mit eigenem Lebenszyklus.
