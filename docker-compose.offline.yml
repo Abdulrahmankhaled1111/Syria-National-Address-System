@@ -1,0 +1,67 @@
+services:
+  web:
+    image: sna-offline:${SNA_RELEASE_TAG:-local}
+    restart: unless-stopped
+    environment:
+      SNA_ENV: production
+      SNA_TOKEN_SECRET: ${SNA_TOKEN_SECRET:?required}
+      SNA_TOKEN_TTL_SECONDS: ${SNA_TOKEN_TTL_SECONDS:-3600}
+      SNA_ALLOWED_HOSTS: ${SNA_ALLOWED_HOSTS:?required},web,127.0.0.1,localhost
+      SNA_DB_PATH: /data/registry.db
+      SNA_BOOTSTRAP_ADMIN_USERNAME: ${SNA_BOOTSTRAP_ADMIN_USERNAME:-state-admin}
+      SNA_BOOTSTRAP_ADMIN_PASSWORD: ${SNA_BOOTSTRAP_ADMIN_PASSWORD:?required}
+    volumes:
+      - registry_data:/data
+    read_only: true
+    tmpfs: ["/tmp"]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    networks: [application, registry]
+    healthcheck:
+      test: ["CMD","python","-c","import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health')"]
+      interval: 20s
+      timeout: 3s
+      retries: 5
+
+  gateway:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    depends_on:
+      web: {condition: service_healthy}
+    ports: ["${SNA_HTTPS_PORT:-8443}:443"]
+    volumes:
+      - ./deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./deploy/tls:/etc/nginx/tls:ro
+    read_only: true
+    tmpfs: ["/var/cache/nginx", "/var/run"]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    cap_add: ["NET_BIND_SERVICE"]
+    networks: [application]
+
+  postgis:
+    image: postgis/postgis:16-3.4
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: sna
+      POSTGRES_USER: sna_admin
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?required}
+    volumes:
+      - postgis_data:/var/lib/postgresql/data
+      - ./db/migrations:/docker-entrypoint-initdb.d:ro
+    read_only: false
+    security_opt: ["no-new-privileges:true"]
+    networks: [registry]
+    healthcheck:
+      test: ["CMD-SHELL","pg_isready -U sna_admin -d sna"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+networks:
+  application: {}
+  registry: {internal: true}
+
+volumes:
+  registry_data: {}
+  postgis_data: {}

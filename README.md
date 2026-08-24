@@ -9,6 +9,11 @@ Datenhoheit, Registertrennung, drei Rechenzentrumsstandorte, HSM/MFA,
 Fortführungsworkflow, SOC, Backups und stufenweisen nationalen Rollout steht in
 [`docs/NATIONAL_SYSTEM_BLUEPRINT.md`](docs/NATIONAL_SYSTEM_BLUEPRINT.md).
 
+Für Behördennetze ohne Internetzugang enthält das Projekt außerdem eine
+installierbare Offline-Webanwendung, ein Air-Gap-Containerpaket mit Prüfsummen
+und eine getrennte Server-Installationsstrecke. Betriebsgrenzen und Übergabe:
+[`docs/AIR_GAPPED_OPERATION.md`](docs/AIR_GAPPED_OPERATION.md).
+
 ## Produktionsmodus
 
 Version 0.17 führt einen abgesicherten Produktionsmodus ein. Er verweigert den

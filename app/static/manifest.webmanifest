@@ -1,0 +1,15 @@
+{
+  "name": "Syrian National Address and Cadastre Platform",
+  "short_name": "Syria Geoportal",
+  "description": "Offline-capable public address map and protected authority portal.",
+  "lang": "ar",
+  "dir": "rtl",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f3f6f4",
+  "theme_color": "#07543d",
+  "icons": [
+    {"src": "/static/syria-logo.png", "sizes": "any", "type": "image/png", "purpose": "any maskable"}
+  ]
+}

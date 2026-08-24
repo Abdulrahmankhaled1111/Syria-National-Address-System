@@ -698,12 +698,13 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def send_file(self, path):
+    def send_file(self, path, service_worker=False):
         if not path.exists() or not path.is_file():
             return self.send_error(404)
-        mime = {".html":"text/html; charset=utf-8",".css":"text/css; charset=utf-8",".js":"application/javascript; charset=utf-8",".svg":"image/svg+xml"}.get(path.suffix,"application/octet-stream")
+        mime = {".html":"text/html; charset=utf-8",".css":"text/css; charset=utf-8",".js":"application/javascript; charset=utf-8",".svg":"image/svg+xml",".webmanifest":"application/manifest+json; charset=utf-8",".png":"image/png",".jpg":"image/jpeg",".jpeg":"image/jpeg"}.get(path.suffix,"application/octet-stream")
         data = path.read_bytes()
         self.send_response(200); self.send_header("Content-Type",mime); self.send_header("Content-Length",str(len(data)))
+        if service_worker:self.send_header("Service-Worker-Allowed","/")
         self.security_headers("public, max-age=3600" if path.suffix not in (".html",) else "no-store")
         self.end_headers(); self.wfile.write(data)
 
@@ -779,6 +780,8 @@ class Handler(BaseHTTPRequestHandler):
         if not self.valid_host():return
         parsed = urlparse(self.path); path = parsed.path
         if path in ("/","/admin"): return self.send_file(STATIC / ("admin.html" if path == "/admin" else "index.html"))
+        if path == "/sw.js": return self.send_file(STATIC / "sw.js",service_worker=True)
+        if path == "/manifest.webmanifest": return self.send_file(STATIC / "manifest.webmanifest")
         if path.startswith("/static/"):
             safe = (STATIC / path.removeprefix("/static/")).resolve()
             return self.send_file(safe) if STATIC.resolve() in safe.parents else self.send_error(403)

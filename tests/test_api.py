@@ -55,6 +55,23 @@ class ApiTest(unittest.TestCase):
         self.assertEqual(status,200)
         self.assertEqual(headers["X-Frame-Options"],"DENY")
         self.assertIn("frame-ancestors 'none'",headers["Content-Security-Policy"])
+
+    def test_offline_application_assets_are_served_safely(self):
+        status,headers,worker=call_raw("/sw.js")
+        self.assertEqual(status,200)
+        self.assertEqual(headers.get_content_type(),"application/javascript")
+        self.assertEqual(headers["Service-Worker-Allowed"],"/")
+        self.assertIn(b'headers.has("Authorization")',worker)
+        self.assertNotIn(b"caches.put(request",worker)
+        status,headers,manifest=call_raw("/manifest.webmanifest")
+        self.assertEqual(status,200)
+        self.assertEqual(headers.get_content_type(),"application/manifest+json")
+        self.assertEqual(json.loads(manifest)["scope"],"/")
+        for path in ("/","/admin"):
+            status,_,html=call_raw(path)
+            self.assertEqual(status,200)
+            self.assertIn(b'/static/offline.js',html)
+            self.assertIn(b'/manifest.webmanifest',html)
     def test_printable_pdf_dossier(self):
         status,headers,data=call_raw("/api/v1/pdf/ADDRESS/adr-001")
         self.assertEqual(status,200)
