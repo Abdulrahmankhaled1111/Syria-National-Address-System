@@ -127,6 +127,7 @@ class ApiTest(unittest.TestCase):
         self.assertIn(b'openPortalPage("settings")',script)
         self.assertNotIn(b'data-page="settings"',script)
         self.assertNotIn(b'data-page="support"',script)
+        self.assertIn(b'<svg viewBox="0 0 24 24">',script)
     def test_printable_pdf_dossier(self):
         status,headers,data=call_raw("/api/v1/pdf/ADDRESS/adr-001")
         self.assertEqual(status,200)
