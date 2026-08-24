@@ -1,4 +1,4 @@
-# Syrisches nationales Adress- und Geoinformationssystem – Production Candidate v0.17
+# Syrisches nationales Adress- und Geoinformationssystem – Production Candidate v0.19
 
 Lauffähiges MVP für einen fachlich kontrollierten Adress- und Geodatenbestand. Enthalten sind dreisprachige öffentliche Suche und Verwaltung (Arabisch, Englisch, Deutsch), vereinfachte Kartenansicht, Postgebiete, Rollen, Änderungs-/Freigabeworkflow, Historisierungskonzept, verkettetes Auditlog, PostGIS-Schema, Pilotdaten, Tests, Backup/Restore und Betriebsdokumentation.
 
@@ -13,6 +13,16 @@ Für Behördennetze ohne Internetzugang enthält das Projekt außerdem eine
 installierbare Offline-Webanwendung, ein Air-Gap-Containerpaket mit Prüfsummen
 und eine getrennte Server-Installationsstrecke. Betriebsgrenzen und Übergabe:
 [`docs/AIR_GAPPED_OPERATION.md`](docs/AIR_GAPPED_OPERATION.md).
+
+## Isolierter Mitarbeiter-Assistent
+
+Das Verwaltungsportal enthält einen dreisprachigen, lokalen Beratungsassistenten
+für Arbeitsabläufe, Kataster, Adressierung, Rollen, Datenqualität, Sicherheit
+und Offline-Betrieb. Er ist nur nach Mitarbeiter-Anmeldung verfügbar und nennt
+die verwendeten internen Dokumente. Sein separates Wissensmodul besitzt keinen
+Datenbank-, Netzwerk-, Datei- oder Aktionszugriff. Es kann daher keine Vorgänge
+erstellen, verändern, genehmigen, löschen oder exportieren. Architektur und
+Pflegeprozess: [`docs/STAFF_ASSISTANT.md`](docs/STAFF_ASSISTANT.md).
 
 ## Produktionsmodus
 

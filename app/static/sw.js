@@ -1,10 +1,10 @@
 "use strict";
 
-const VERSION = "sna-public-v1";
+const VERSION = "sna-public-v2";
 const SHELL = [
   "/", "/admin", "/manifest.webmanifest",
   "/static/style.css", "/static/map-views.css", "/static/coherence.css",
-  "/static/app.js", "/static/admin.js", "/static/offline.js",
+  "/static/app.js", "/static/admin.js", "/static/offline.js", "/static/assistant.js",
   "/static/vendor/maplibre/maplibre-gl.css", "/static/vendor/maplibre/maplibre-gl.js",
   "/static/syria-logo.png", "/static/syria-logo-transparent.png"
 ];

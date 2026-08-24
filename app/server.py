@@ -26,6 +26,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 from xml.sax.saxutils import escape as xml_escape
 from pdf_dossier import build_pdf, build_cadastral_map_pdf
+from assistant_service import answer as assistant_answer
 
 ROOT = Path(__file__).resolve().parents[1]
 STATIC = Path(__file__).resolve().parent / "static"
@@ -668,7 +669,7 @@ def decode_token(token):
         return None
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "SNA-Production-Candidate/0.17"
+    server_version = "SNA-Production-Candidate/0.19"
 
     def log_message(self, fmt, *args):
         request_id=getattr(self,"request_id",None) or uuid.uuid4().hex
@@ -785,7 +786,7 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/static/"):
             safe = (STATIC / path.removeprefix("/static/")).resolve()
             return self.send_file(safe) if STATIC.resolve() in safe.parents else self.send_error(403)
-        if path == "/health": return self.send_json({"status":"ok","service":"sna-production-candidate","version":"0.18.0"})
+        if path == "/health": return self.send_json({"status":"ok","service":"sna-production-candidate","version":"0.19.0"})
         if path == "/ready":
             checks={"database":False,"audit_chain":False,"national_catalog":NATIONAL_DB.exists(),
                     "boundary":(DATA/"syria_boundary.geojson").exists()}
@@ -1386,6 +1387,12 @@ class Handler(BaseHTTPRequestHandler):
             login_succeeded(login_key)
             return self.send_json({"token":encode_token(user),"user":{"id":user["id"],"display_name":user["display_name"],
                 "role":user["operational_role"],"organisation":user["organisation"],"admin_unit_id":user["admin_unit_id"]}})
+        if path == "/api/v1/assistant/query":
+            actor=self.require({"GOVERNORATE_ADMIN","MUNICIPAL_EDITOR","SURVEYOR","REVIEWER","APPROVER",
+                                "PRINT_OFFICER","INSTALLER","REGISTRY_OFFICER","AUDITOR","SYSTEM_ADMIN"})
+            if not actor:return
+            try:return self.send_json(assistant_answer(data.get("question",""),data.get("language","ar")))
+            except ValueError as exc:return self.send_json({"error":str(exc)},422)
         if path == "/api/v1/settings":
             actor=self.require({"SYSTEM_ADMIN"})
             if not actor:return

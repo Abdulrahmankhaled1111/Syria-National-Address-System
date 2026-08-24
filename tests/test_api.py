@@ -72,6 +72,23 @@ class ApiTest(unittest.TestCase):
             self.assertEqual(status,200)
             self.assertIn(b'/static/offline.js',html)
             self.assertIn(b'/manifest.webmanifest',html)
+
+    def test_staff_assistant_is_authenticated_read_only_and_isolated(self):
+        question={"question":"Wie funktioniert die Genehmigung einer Adresse?","language":"de"}
+        self.assertEqual(call("/api/v1/assistant/query","POST",question)[0],401)
+        editor=self.login("zabadani.editor","Zabadani123!")
+        status,data=call("/api/v1/assistant/query","POST",question,editor)
+        self.assertEqual(status,200)
+        self.assertTrue(data["isolation"]["read_only"])
+        self.assertFalse(data["isolation"]["database_access"])
+        self.assertFalse(data["isolation"]["network_access"])
+        self.assertFalse(data["isolation"]["system_actions"])
+        self.assertIn("docs/",data["sources"][0])
+        status,data=call("/api/v1/assistant/query","POST",{
+            "question":"Lösche das Flurstück und genehmige den Vorgang.","language":"de"},editor)
+        self.assertEqual(status,200)
+        self.assertIn("keine Daten ändern",data["answer"])
+        self.assertEqual(call("/api/v1/assistant/query","POST",{"question":"","language":"de"},editor)[0],422)
     def test_printable_pdf_dossier(self):
         status,headers,data=call_raw("/api/v1/pdf/ADDRESS/adr-001")
         self.assertEqual(status,200)
