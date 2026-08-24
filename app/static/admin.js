@@ -157,11 +157,11 @@ function prepareFieldMap(){
   $("#change-graphics-toggle small").textContent=lang==="ar"?"الطرق • السجل العقاري • الصور الجوية":lang==="de"?"Straßen • Kataster • Luftbild":"Roads • Cadastre • Imagery";
   $(".field-position-card strong").textContent=lang==="ar"?"موضع رقم المنزل عند المدخل":lang==="de"?"Position der Hausnummer an der Haustür":"House-number position at the entrance";
   const workflow=document.createElement("section");workflow.className="cadastre-workflow";workflow.innerHTML=`<div class="workflow-head"><strong>${lang==="de"?"Bauamt · Katastererfassung":"Municipal cadastre workflow"}</strong><span>Syrien → Damaskus</span></div><div class="workflow-steps"><div><b>1</b><span>${lang==="de"?"Flurgrenze zeichnen und nummerieren":"Draw and number section"}</span><select id="workflow-section"><option value="">—</option></select><button id="workflow-new-section" type="button">${lang==="de"?"Neue Flur zeichnen":"Draw new section"}</button></div><div><b>2</b><span>${lang==="de"?"Flurstück innerhalb der Flur zeichnen":"Draw parcel inside section"}</span><button id="workflow-capture-parcel" type="button">${lang==="de"?"Flurstück erfassen":"Capture parcel"}</button></div><div><b>3</b><span>${lang==="de"?"Gebäude zuordnen und Hausnummer vergeben":"Link building and assign house number"}</span><button id="workflow-assign-building" type="button">${lang==="de"?"Gebäude/Hausnummer":"Building/address"}</button></div></div><p id="workflow-message"></p>`;
-  wrapper.before(workflow);
+  wrapper.after(workflow);
   const governoratePanel=document.createElement("section");
-  governoratePanel.className="governorate-scope-panel";
-  governoratePanel.innerHTML=`<div><strong>${lang==="ar"?"نطاق الإدارة":lang==="de"?"Verwaltungsbereich":"Administrative area"}</strong><small>${lang==="ar"?"كل محافظة لها رقم وصلاحيات مستقلة":lang==="de"?"Jedes Gouvernement besitzt eine eigene Kennung und getrennte Zugriffsrechte.":"Each governorate has its own code and access scope."}</small></div><select id="governorate-scope"><option value="">${lang==="ar"?"تحميل المحافظات…":lang==="de"?"Gouvernements werden geladen …":"Loading governorates …"}</option></select><button id="governorate-show" type="button">${lang==="ar"?"عرض منفصل":lang==="de"?"Allein auf Karte anzeigen":"Show separately"}</button><span id="governorate-access-note"></span>`;
-  workflow.before(governoratePanel);
+  governoratePanel.className="governorate-scope-panel map-scope-compact";
+  governoratePanel.innerHTML=`<label title="${lang==="ar"?"اختيار المحافظة":lang==="de"?"Gouvernement auswählen":"Select governorate"}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s6-5.1 6-11a6 6 0 1 0-12 0c0 5.9 6 11 6 11Z"></path><circle cx="12" cy="10" r="2.2"></circle></svg><select id="governorate-scope" aria-label="${lang==="de"?"Gouvernement auswählen":"Select governorate"}"><option value="">${lang==="ar"?"تحميل…":lang==="de"?"Wird geladen …":"Loading …"}</option></select></label><button id="governorate-show" type="button" aria-label="${lang==="de"?"Auf Gouvernement zoomen":"Zoom to governorate"}" title="${lang==="de"?"Auf Gouvernement zoomen":"Zoom to governorate"}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5M16 3h5v5M21 16v5h-5M3 16v5h5"></path><circle cx="12" cy="12" r="3"></circle></svg></button><span id="governorate-access-note" class="visually-hidden"></span>`;
+  $(".cad-title").after(governoratePanel);
   let governorates=[];
   focusActiveAdminArea=(duration=0)=>{
     // Camera changes are valid while raster tiles are still loading. Waiting for
@@ -210,7 +210,7 @@ function prepareFieldMap(){
       activeAdminUnitId="ALL";
       selectedGovernorateBoundary=null;fieldMap.setMaxBounds(null);syncFieldBoundarySources();renderFieldNationalOverlay();
       focusActiveAdminArea(900);$("#governorate-access-note").textContent=lang==="de"?"Nationaler Administrator · Zugriff auf alle 14 Gouvernements":"National administrator · access to all 14 governorates";
-      $(".cad-title>span:nth-child(2)").textContent=lang==="ar"?"البوابة الجغرافية الوطنية السورية":lang==="de"?"Nationales Geoportal Syrien":"Syrian National Geoportal";
+      $(".cad-title>span:nth-child(2)").textContent=lang==="ar"?"البوابة الجغرافية السورية":lang==="de"?"Geoportal Syrien":"Syria Geoportal";
       $(".workflow-head span").textContent=lang==="de"?"Syrien · 14 getrennte Verwaltungsbereiche":"Syria · 14 separate administrative areas";
       $("#active-register-label").textContent=lang==="ar"?"سوريا · السجل الوطني":lang==="de"?"Syrien · Nationales Register":"Syria · National register";
       $("#cad-fit-city").textContent=lang==="ar"?"عرض سوريا كاملة":lang==="de"?"Ganz Syrien anzeigen":"Show all Syria";
@@ -225,7 +225,7 @@ function prepareFieldMap(){
     renderFieldNationalOverlay();
     focusActiveAdminArea(900);
     $("#governorate-access-note").textContent=`${item.official_code} · ${lang==="ar"?item.name_ar:item.name_en} · ${lang==="de"?"eigener Verwaltungsbereich":"separate administrative scope"}`;
-    $(".cad-title>span:nth-child(2)").textContent=lang==="ar"?`البوابة الجغرافية · ${item.name_ar}`:lang==="de"?`Geoportal · Gouvernement ${item.name_en}`:`Geoportal · ${item.name_en} Governorate`;
+    $(".cad-title>span:nth-child(2)").textContent=lang==="ar"?"البوابة الجغرافية السورية":lang==="de"?"Geoportal Syrien":"Syria Geoportal";
     $(".workflow-head span").textContent=`Syrien → ${lang==="ar"?item.name_ar:item.name_en}`;
     $("#active-register-label").textContent=`${item.official_code} · ${lang==="ar"?item.name_ar:item.name_en}`;
     $("#cad-fit-city").textContent=lang==="ar"?`عرض ${item.name_ar}`:lang==="de"?`${item.name_en} anzeigen`:`Show ${item.name_en}`;
@@ -238,7 +238,7 @@ function prepareFieldMap(){
   };
   $("#workflow-new-section").insertAdjacentHTML("afterend",`<div class="workflow-inline-actions"><button id="workflow-edit-section" class="ghost" type="button">${lang==="de"?"Bearbeiten":"Edit"}</button><button id="workflow-delete-section" class="ghost danger" type="button">${lang==="de"?"Löschen":"Delete"}</button></div>`);
   $("#workflow-capture-parcel").insertAdjacentHTML("afterend",`<div class="workflow-inline-actions"><button id="workflow-edit-parcel" class="ghost" type="button">${lang==="de"?"Grenze bearbeiten":"Edit boundary"}</button><button id="workflow-delete-parcel" class="ghost danger" type="button">${lang==="de"?"Flurstück löschen":"Delete parcel"}</button></div>`);
-  $(".cad-title>span:nth-child(2)").textContent=lang==="ar"?"البوابة الجغرافية الوطنية السورية":lang==="de"?"Nationales Geoportal Syrien":"Syrian National Geoportal";
+  $(".cad-title>span:nth-child(2)").textContent=lang==="ar"?"البوابة الجغرافية السورية":lang==="de"?"Geoportal Syrien":"Syria Geoportal";
   form.insertAdjacentHTML("beforeend",`<label><span>${lang==="ar"?"عدد الطوابق":lang==="de"?"Etagen":"Floors"}</span><input id="building-floors" type="number" min="0" max="200" value="1"></label><label><span>${lang==="ar"?"عدد الوحدات السكنية":lang==="de"?"Wohnungen":"Dwellings"}</span><input id="building-units" type="number" min="0" max="5000" value="1"></label>`);
   applyLanguage();
   fieldMap=new maplibregl.Map({container:"field-map",style:{version:8,glyphs:"https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",sources:{street:{type:"raster",tiles:["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],tileSize:256,maxzoom:19,attribution:"© OpenStreetMap contributors"},satellite:{type:"raster",tiles:["https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"],tileSize:256,maxzoom:18,attribution:"Esri, Maxar, Earthstar Geographics"}},layers:[{id:"street-field",type:"raster",source:"street"},{id:"satellite",type:"raster",source:"satellite"},{id:"field-cadastral-background",type:"background",layout:{visibility:"none"},paint:{"background-color":"#f5e5e9"}}]},center:[36.1002,33.7244],zoom:16.2,pitch:0,bearing:0,antialias:true,preserveDrawingBuffer:true,maxPitch:60,minZoom:3,maxZoom:24,scrollZoom:true,doubleClickZoom:true,dragPan:true,touchZoomRotate:true});
