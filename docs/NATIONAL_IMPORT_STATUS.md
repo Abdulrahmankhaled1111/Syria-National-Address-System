@@ -15,6 +15,7 @@ Alle Objekte besitzen zunächst `OPEN_DATA_UNVERIFIED` und Qualitätsstufe D. De
 Die öffentliche Suche findet landesweit:
 
 - arabische, englische und sonstige vorhandene Straßennamen;
+- amtliche, alternative, lokale, kurze und frühere Namen, soweit sie in der Quelle vorhanden sind;
 - Straßennummern/Referenzen;
 - Städte, Dörfer und Ortsteile;
 - technische Gebäudeobjektkennungen.

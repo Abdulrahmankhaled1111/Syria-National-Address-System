@@ -7,6 +7,8 @@ object records, representative coordinates and bounding boxes.
 import sqlite3
 import sys
 import time
+import shutil
+import tempfile
 from pathlib import Path
 
 ROOT=Path(__file__).resolve().parents[1]
@@ -20,7 +22,7 @@ SCHEMA="""
 PRAGMA journal_mode=OFF; PRAGMA synchronous=OFF; PRAGMA temp_store=MEMORY;
 CREATE TABLE metadata(key TEXT PRIMARY KEY,value TEXT NOT NULL);
 CREATE TABLE roads(osm_id INTEGER PRIMARY KEY,technical_code TEXT UNIQUE NOT NULL,name_ar TEXT,name_en TEXT,name TEXT,
- highway TEXT,ref TEXT,lon REAL,lat REAL,min_lon REAL,min_lat REAL,max_lon REAL,max_lat REAL,source_status TEXT NOT NULL);
+ aliases TEXT,highway TEXT,ref TEXT,lon REAL,lat REAL,min_lon REAL,min_lat REAL,max_lon REAL,max_lat REAL,source_status TEXT NOT NULL);
 CREATE TABLE buildings(osm_id INTEGER PRIMARY KEY,technical_code TEXT UNIQUE NOT NULL,building_type TEXT,
  lon REAL,lat REAL,min_lon REAL,min_lat REAL,max_lon REAL,max_lat REAL,source_status TEXT NOT NULL);
 CREATE TABLE places(osm_id INTEGER PRIMARY KEY,technical_code TEXT UNIQUE NOT NULL,name_ar TEXT,name_en TEXT,name TEXT,
@@ -44,9 +46,13 @@ class Importer(osmium.SimpleHandler):
         xs=[p[0] for p in pts];ys=[p[1] for p in pts];lon=sum(xs)/len(xs);lat=sum(ys)/len(ys)
         bounds=(min(xs),min(ys),max(xs),max(ys))
         if is_road:
-            self.conn.execute("INSERT OR REPLACE INTO roads VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            aliases=" | ".join(dict.fromkeys(value.strip() for key in
+                ("official_name","official_name:ar","official_name:en","alt_name","alt_name:ar","alt_name:en",
+                 "old_name","old_name:ar","old_name:en","loc_name","short_name")
+                for value in [w.tags.get(key)] if value and value.strip()))
+            self.conn.execute("INSERT OR REPLACE INTO roads VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
               (w.id,f"SY-OSM-ROAD-{w.id}",w.tags.get("name:ar"),w.tags.get("name:en"),w.tags.get("name"),
-               w.tags.get("highway"),w.tags.get("ref"),lon,lat,*bounds,"OPEN_DATA_UNVERIFIED"))
+               aliases or None,w.tags.get("highway"),w.tags.get("ref"),lon,lat,*bounds,"OPEN_DATA_UNVERIFIED"))
             self.roads+=1
         if is_building:
             self.conn.execute("INSERT OR REPLACE INTO buildings VALUES(?,?,?,?,?,?,?,?,?,?)",
@@ -57,10 +63,26 @@ def main():
     if not PBF.exists():raise SystemExit(f"Missing {PBF}")
     if TARGET.exists():TARGET.unlink()
     conn=sqlite3.connect(TARGET);conn.executescript(SCHEMA)
-    started=time.time();handler=Importer(conn);handler.apply_file(str(PBF),locations=True)
+    # Some Windows-native PBF readers cannot open a path containing non-ASCII
+    # characters. Use an ASCII-only temporary snapshot in that case.
+    import_path=PBF
+    temporary_copy=None
+    try:
+        str(PBF).encode("ascii")
+    except UnicodeEncodeError:
+        temporary_copy=Path(tempfile.gettempdir())/"syria-latest.osm.pbf"
+        shutil.copyfile(PBF,temporary_copy)
+        import_path=temporary_copy
+    started=time.time();handler=Importer(conn)
+    try:
+        handler.apply_file(str(import_path),locations=True)
+    finally:
+        if temporary_copy:
+            temporary_copy.unlink(missing_ok=True)
     conn.execute("CREATE INDEX roads_name_idx ON roads(name)")
     conn.execute("CREATE INDEX roads_name_ar_idx ON roads(name_ar)")
     conn.execute("CREATE INDEX roads_name_en_idx ON roads(name_en)")
+    conn.execute("CREATE INDEX roads_aliases_idx ON roads(aliases)")
     conn.execute("CREATE INDEX buildings_code_idx ON buildings(technical_code)")
     conn.execute("CREATE INDEX places_name_idx ON places(name)")
     for key,value in {"source":"Geofabrik / OpenStreetMap contributors","license":"ODbL 1.0",

@@ -1108,9 +1108,9 @@ class Handler(BaseHTTPRequestHandler):
             if q and NATIONAL_DB.exists():
                 with national_db() as nconn:
                     for r in nconn.execute("""SELECT * FROM roads WHERE coalesce(name_ar,'') LIKE ? OR
-                        coalesce(name_en,'') LIKE ? OR coalesce(name,'') LIKE ? OR ref LIKE ?
+                        coalesce(name_en,'') LIKE ? OR coalesce(name,'') LIKE ? OR coalesce(aliases,'') LIKE ? OR ref LIKE ?
                         ORDER BY CASE WHEN name_ar=? OR name=? THEN 0 ELSE 1 END LIMIT 80""",
-                        (like,like,like,like,q,q)):
+                        (like,like,like,like,like,q,q)):
                         items.append({"object_type":"SYRIA_ROAD","id":f"osm-road-{r['osm_id']}",
                           "technical_code":r["technical_code"],"label_ar":r["name_ar"] or r["name"] or r["technical_code"],
                           "label_en":r["name_en"],"longitude":r["lon"],"latitude":r["lat"],
